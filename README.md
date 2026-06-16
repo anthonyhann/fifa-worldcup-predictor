@@ -1,155 +1,77 @@
-# 🏆 FIFA World Cup Predictor
+# FIFA World Cup Predictor
 
 <p align="center">
-  <strong>A Self-Evolving Quantitative Football Prediction System</strong><br>
-  <em>Elo Ratings · Poisson Distribution · Monte Carlo Simulation · Bayesian Inference</em>
+  <strong>Predict World Cup matches. Review real results. Get better over time.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-3.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="license">
-  <img src="https://img.shields.io/badge/status-active-brightgreen" alt="status">
 </p>
 
----
-
-## 📖 Overview
-
-The **FIFA World Cup Predictor** is a comprehensive, self-improving football prediction engine designed specifically for FIFA World Cup matches. It integrates quantitative modeling (Elo ratings, Poisson distribution, Monte Carlo simulation) with Bayesian probabilistic reasoning and tactical context analysis. What makes it unique is its **self-evolution capability** — after every match, it reviews real-world results, calibrates its parameters, and continuously improves prediction accuracy and betting ROI.
-
-### 🎯 Core Objectives
-
-1. **Maximize prediction accuracy** — learn from every match outcome
-2. **Maximize betting returns** — identify value bets and optimize staking strategies
+> 中文用户请阅读 [README_zh.md](README_zh.md)
 
 ---
 
-## 🧠 Architecture
+## What is this?
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   FIFA World Cup Predictor v3.0                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────┐ │
-│  │ Pre-Match    │   │ Post-Match   │   │ Self-Evolution       │ │
-│  │ Prediction   │──▶│ Review       │──▶│ Engine               │ │
-│  │              │   │              │   │                      │ │
-│  │ • Elo Rating │   │ • Web Search │   │ • Parameter Auto-Cal │ │
-│  │ • Poisson xG │   │ • Multi-Dim  │   │ • Accuracy Tracking  │ │
-│  │ • Monte Carlo│   │   Scoring    │   │ • Trend Detection    │ │
-│  │ • Bayesian   │   │ • Elo Update │   │ • Strategy Optimize  │ │
-│  │   Inference  │   │ • Stats Sync │   │                      │ │
-│  └──────────────┘   └──────────────┘   └──────────────────────┘ │
-│                          │                                       │
-│                          ▼                                       │
-│                 ┌────────────────┐                               │
-│                 │ Profit Tracker │                               │
-│                 │ • Virtual Bets │                               │
-│                 │ • ROI Tracking │                               │
-│                 │ • Max Drawdown │                               │
-│                 │ • Strategy Comp│                               │
-│                 └────────────────┘                               │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+This tool helps you predict FIFA World Cup matches. You feed it two teams and it tells you who's likely to win, by what score, and whether the betting odds look off. That's the baseline. What sets it apart is that after each match, it checks what actually happened and calibrates itself — so the more matches it watches, the better it gets.
+
+Think of it as an analyst who never stops studying film.
 
 ---
 
-## ✨ Features
+## What it can do
 
-### 🔮 Prediction (Quant + Bayesian)
+### Before the match
 
-| Feature | Description |
-|---------|-------------|
-| **Match Prediction** | Elo ratings + Poisson xG → Home/Draw/Away probabilities + most likely scores |
-| **Upset Detection** | 3-layer criteria: style mismatch, form variance, tournament advantage |
-| **Advancement Simulation** | 100K Monte Carlo runs to project knockout stage probabilities |
-| **Odds Value Detection** | Model probability vs. implied market probability; flags ≥3% edge + Kelly stake |
-| **Bayesian P0→P1** | Prior → Tactical Context → League Factors → Likelihood Update → Posterior |
-| **Tactical Analysis** | Possession trap detection, style counter analysis, tournament-specific modifiers |
-| **Scenario Narratives** | Generates 2-4 distinct match scenarios based on tactical mechanisms |
-| **v2.0 Opener Patch** | Auto-applies xG correction for tournament openers (favorite goals ×0.5, underdog boost, draw +15%) |
+- **Predict win/draw/loss odds** for any World Cup matchup, along with the most likely final score
+- **Spot potential upsets** early — when a weaker team has a real shot due to style mismatches or tournament context
+- **Simulate tournament paths** to see each team's odds of reaching the quarters, semis, or final
+- **Find mispriced betting odds** — if the market says one thing and the model disagrees by enough margin, it flags it
+- **Generate match scenarios** — not just numbers, but narratives about how the game might play out
 
-### 🧬 Self-Evolution (v3.0)
+### After the match
 
-| Feature | Description |
-|---------|-------------|
-| **Post-Match Review** | Web search real results → compare vs. prediction → 100-point multi-dimensional score |
-| **Elo Live Update** | Auto-update Elo after each match (K=32 group stage / K=48 knockout) |
-| **Parameter Auto-Calibration** | Optimizes Elo weight, draw boost, goal corrections, K-factor from review data |
-| **Accuracy Tracking** | Tracks overall/recent directional accuracy with trend detection (improving/stable/declining) |
-| **Profit Tracking** | Virtual betting simulation → ROI → strategy comparison (Half-Kelly / Fixed / Value) |
-| **Evolution Reports** | Parameter change history, accuracy timeline, strategy optimization suggestions |
+- **Review every prediction** automatically by searching for real match results
+- **Score itself** on a 100-point scale across direction, score accuracy, goal prediction, and value calls
+- **Update team ratings** based on what actually happened on the pitch
+
+### Self-improvement
+
+- **Auto-calibrate** after watching enough matches — tweaks its own internal parameters based on what it got wrong
+- **Track accuracy over time** so you can see if it's getting smarter or needs attention
+- **Run profit simulations** across multiple betting strategies to see which approach would have made money
 
 ---
 
-## 📁 File Structure
-
-```
-fifa-worldcup-predictor/
-├── README.md                          # You are here (English)
-├── README_zh.md                       # Chinese version
-├── SKILL.md                           # Full skill definition & workflow
-├── scripts/
-│   ├── prediction_engine.py           # Core engine (Elo + Poisson + Monte Carlo)
-│   ├── odds_fetcher.py                # Live odds from The Odds API
-│   ├── post_match_review.py           # Post-match review & web search
-│   ├── evolution_engine.py            # Self-evolution & parameter calibration
-│   └── profit_tracker.py              # Virtual betting & ROI tracking
-├── data/
-│   ├── elo_ratings.json               # Elo ratings for 48 World Cup teams
-│   ├── team_stats.json                # Team attack/defense stats (EMA updated)
-│   └── corrections.json               # Correction factors (openers, upsets, etc.)
-├── references/
-│   ├── analytical_framework.md        # Bayesian analysis framework reference
-│   └── calibration_methodology.md     # Parameter calibration methodology
-└── logs/
-    ├── prediction_log.md              # Pre-match prediction records
-    ├── review_log.jsonl               # Post-match review records (JSONL)
-    ├── profit_track.jsonl             # Betting profit/loss records (JSONL)
-    ├── evolution_state.json           # Evolution engine state & param history
-    └── profit_state.json              # Profit tracking state
-```
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- Internet access (for live odds and post-match web search)
-
-### Installation
+## Quick start
 
 ```bash
-# Clone the repository
 git clone https://github.com/anthonyhann/fifa-worldcup-predictor.git
 cd fifa-worldcup-predictor
-
-# No external dependencies required — pure Python standard library!
 ```
 
-### Predict a Match
+That's it. No dependencies to install — the whole thing runs on Python's standard library.
+
+### Predict a match
 
 ```python
 from scripts.prediction_engine import FootballPredictionEngine
 
 engine = FootballPredictionEngine(data_dir='data')
 
-# Argentina vs France (knockout stage)
+# Argentina vs France, knockout stage
 prediction = engine.predict('Argentina', 'France', is_knockout=True)
 
-print(f"Win: {prediction['final']['win_a']}%")
-print(f"Draw: {prediction['final']['draw']}%")
-print(f"Lose: {prediction['final']['win_b']}%")
-print(f"xG: {prediction['xg_a']} - {prediction['xg_b']}")
-print(f"Most Likely Score: {prediction['most_likely_scores'][0]}")
+print(f"Argentina win: {prediction['final']['win_a']}%")
+print(f"Draw:          {prediction['final']['draw']}%")
+print(f"France win:    {prediction['final']['win_b']}%")
+print(f"Most likely:   {prediction['most_likely_scores'][0]}")
 ```
 
-### Review After Match
+### Review the result
 
 ```python
 from scripts.post_match_review import PostMatchReviewer
@@ -157,153 +79,85 @@ from scripts.post_match_review import PostMatchReviewer
 reviewer = PostMatchReviewer('.')
 review = reviewer.review_match('Argentina', 'France', (2, 1), prediction)
 
-print(f"Review Score: {review['scores']['total']}/100 ({review['scores']['grade']})")
-print(f"Elo Changes: {review['elo_changes']}")
-print(f"Direction Correct: {review['scores']['direction_correct']}")
+print(f"Review: {review['scores']['total']}/100 — {review['scores']['grade']}")
+print(f"Direction correct: {review['scores']['direction_correct']}")
 ```
 
-### Trigger Evolution
+### Check how it's improving
 
 ```python
 from scripts.evolution_engine import EvolutionEngine
 
 evo = EvolutionEngine('.')
-result = evo.evolve()
-
-print(f"Evolved: {result['evolved']}")
-print(f"Parameters Changed: {list(result.get('changes', {}).keys())}")
-print(f"Accuracy Metrics: {evo.compute_accuracy_metrics()}")
+evo.evolve()          # auto-calibrates if enough data
+print(evo.compute_accuracy_metrics())
 ```
 
-### Track Profit
+### Simulate betting returns
 
 ```python
 from scripts.profit_tracker import ProfitTracker
 
 tracker = ProfitTracker('.')
-
-# Simulate a bet
 bet = tracker.simulate_bet(
     'Argentina', 'France', prediction,
     odds={'home': 2.80, 'draw': 3.20, 'away': 2.50},
     actual_score=(2, 1)
 )
+print(f"Result: {bet['result']}, Profit: {bet['profit']}")
 
-print(f"Result: {bet['result']}")
-print(f"Profit: {bet['profit']}")
-
-# Full report
 report = tracker.get_profit_report()
-print(f"ROI: {report['roi']}%")
-print(f"Max Drawdown: {report['max_drawdown']}%")
+print(f"ROI: {report['roi']}%, Max drawdown: {report['max_drawdown']}%")
 ```
 
 ---
 
-## 🔬 How It Works
+## The learning loop
 
-### 1. Pre-Match Prediction
+The system runs on a simple cycle:
+
+1. **Predict** — Elo ratings set a baseline, Poisson distribution estimates expected goals, then tactical context and tournament factors refine the numbers
+2. **Review** — after the match, it searches the web for the real score and compares against the prediction
+3. **Learn** — every 3+ reviews triggers a recalibration pass that adjusts how much weight to give each factor
+4. **Improve** — repeat, and the predictions get tighter
+
+It tracks four betting strategies in parallel (half-Kelly, full-Kelly, fixed-fraction, and value-only) so you can see which approach fits your risk tolerance.
+
+---
+
+## What's inside
 
 ```
-User Input (Teams, Stage)
-    ↓
-Elo Rating Comparison → Win Expectancy
-    +
-Poisson Distribution → Expected Goals (xG)
-    +
-Correction Factors (Openers, Home Advantage)
-    ↓
-Base Probability (P0)
-    ↓
-Bayesian Tactical Context Update
-  ├── Possession Trap Detection
-  ├── Style Counter Analysis
-  ├── Injury/Lineup Likelihood
-  └── Tournament-Specific Factors
-    ↓
-Posterior Probability (P1) + Scenario Narratives
-    ↓
-Odds Comparison + Kelly Stake Calculation
+fifa-worldcup-predictor/
+├── README.md                    # You're reading it
+├── README_zh.md                 # Chinese version
+├── scripts/
+│   ├── prediction_engine.py     # Match prediction
+│   ├── post_match_review.py     # Post-match review + web search
+│   ├── evolution_engine.py      # Auto-calibration
+│   ├── profit_tracker.py        # Betting simulations
+│   └── odds_fetcher.py          # Live odds (The Odds API)
+├── data/
+│   ├── elo_ratings.json         # 48-team Elo ratings
+│   ├── team_stats.json          # Attack/defense stats
+│   └── corrections.json         # Calibrated correction factors
+└── logs/                        # Prediction & review records
 ```
 
-### 2. Post-Match Review
+---
 
-The system searches the web for real match results, then scores predictions on a 100-point scale:
+## Boundaries
 
-| Dimension | Max Score | Criteria |
-|-----------|-----------|----------|
-| Direction | 30 | Correct winner = full; correct draw = partial |
-| Score | 30 | Exact match gets bonus; close total = up to 20 |
-| xG Accuracy | 20 | Error <0.5 goals = 20; <1.0 = 15; <2.0 = 10 |
-| Odds Value | 20 | Correct low-probability call = 20 |
+Some things this tool is explicitly not designed for:
 
-Elo ratings and team stats are automatically updated after each review.
-
-### 3. Self-Evolution
-
-After ≥3 match reviews, the evolution engine triggers automatic calibration:
-
-| Parameter | Trigger | Adjustment Logic |
-|-----------|---------|------------------|
-| `ELO_WEIGHT` | Elo accuracy vs overall | Adjust ±0.05 based on deviation |
-| `OPENER_DRAW_BOOST` | Actual opener draw rate | Adjust ±0.03 per round |
-| `FAV_GOAL_DISCOUNT` | Opener xG bias | Adjust based on goal deviation |
-| `K_FACTOR` | Overall accuracy trend | ↑ if accuracy declining; ↓ if stable/high |
-
-All changes are capped at ±20% per iteration and logged in `evolution_state.json`.
-
-### 4. Profit Tracking
-
-Four strategies tracked simultaneously:
-
-| Strategy | Description |
-|----------|-------------|
-| **Half-Kelly** | Kelly criterion × 0.5 (conservative) |
-| **Full-Kelly** | Full Kelly criterion (aggressive) |
-| **Fixed Fraction** | Fixed 5% of bankroll per bet |
-| **Value Only** | Bet only when model edge ≥ 3% |
+- It won't tell you what to bet on. It surfaces probabilities and edges; decisions are yours
+- It doesn't predict penalty shootout outcomes — models only regular and extra time
+- It shows its work. When the model disagrees with market odds by a lot, it tells you rather than papering over it
+- If something goes wrong or data is missing, it says so instead of guessing
+- Every web search result is timestamped and sourced
 
 ---
 
-## 📊 Data Sources
+## License
 
-- **Elo Ratings**: Pre-loaded for 48 World Cup teams, dynamically updated after each match
-- **Team Stats**: Goals scored/conceded per match (exponential moving average, α=0.3)
-- **Live Odds**: Via The Odds API (`scripts/odds_fetcher.py`)
-- **Match Results**: Web search for post-match review
-- **Correction Factors**: Empirically calibrated from historical World Cup data
-
----
-
-## 🛡️ Guardrails
-
-- ⚠️ **Never gives direct betting advice** — provides analytical frameworks only
-- 📊 **Never fabricates data** — all calculations executed via code
-- 🔍 **Always flags uncertainty** — highlights when model vs. market diverge significantly
-- ⚠️ **Always includes risk disclaimer** — at the end of every analysis
-- 🎲 **Does NOT predict penalty shootouts** — models only 90/120-minute outcomes
-- 🏷️ **Always cites sources** — web search data labeled with URL and timestamp
-- 🚫 **Missing data = UNAVAILABLE** — never guesses or interpolates missing values
-
----
-
-## 📝 License
-
-MIT License — see [LICENSE](LICENSE) file for details.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Areas of interest:
-
-- Additional league/tournament support
-- More sophisticated tactical models
-- Alternative staking strategies
-- API integrations for live data
-
----
-
-<p align="center">
-  <sub>Built with ❤️ for football analytics enthusiasts</sub>
-</p>
+MIT — see [LICENSE](LICENSE).
