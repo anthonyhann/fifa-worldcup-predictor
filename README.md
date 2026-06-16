@@ -158,6 +158,20 @@ Some things this tool is explicitly not designed for:
 
 ---
 
+## Roadmap
+
+Things we'd like to build next:
+
+- [ ] Support for other tournaments and leagues (Euro, Copa America, domestic leagues)
+- [ ] Richer tactical models — player-level tracking, formation analysis, set-piece probabilities
+- [ ] More staking strategies — fractional Kelly variants, confidence-weighted scaling
+- [ ] Live data integrations — injury reports, lineup announcements, real-time odds feeds
+- [ ] Web dashboard to visualize predictions, reviews, and accuracy trends
+
+Feel free to pick one and open a PR.
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
