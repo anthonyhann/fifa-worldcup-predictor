@@ -181,6 +181,156 @@ class FootballPredictionEngine:
             'tournament_round': tournament_round
         }
     
+    # ============================================
+    # v3.0 实时数据增强预测
+    # ============================================
+    
+    def predict_with_live_data(self, team_a: str, team_b: str,
+                               live_data: Dict = None,
+                               corrections: Dict = None,
+                               is_knockout: bool = False,
+                               tournament_round: str = None) -> Dict:
+        """结合实时伤停/阵容数据增强预测
+        
+        Args:
+            team_a, team_b: 球队名
+            live_data: LiveDataFetcher.get_full_match_data() 的输出
+                {
+                    'lineups': {...},
+                    'injuries': {...},
+                    'odds': {...}
+                }
+        
+        增强逻辑:
+        1. 伤停 → 调整 Elo (缺核心球员降低实力)
+        2. 阵容 → 调整 xG (根据阵型和首发调整预期进球)
+        3. 赔率 → 作为 corrections 参考
+        """
+        corrections = dict(corrections or {})
+        
+        if not live_data:
+            return self.predict(team_a, team_b, corrections, is_knockout, tournament_round)
+        
+        injuries = live_data.get('injuries', {})
+        lineups = live_data.get('lineups', {})
+        
+        # 步骤1: 伤病调整 Elo（临时覆盖实例属性）
+        orig_elo_a = self.elo_ratings.get(team_a, 1500)
+        orig_elo_b = self.elo_ratings.get(team_b, 1500)
+        
+        elo_a_adj, elo_b_adj = self._adjust_elo_for_injuries(team_a, team_b, injuries)
+        
+        # 临时替换 Elo
+        self.elo_ratings[team_a] = elo_a_adj
+        self.elo_ratings[team_b] = elo_b_adj
+        
+        # 步骤2: 阵容调整 xG 系数 → 注入为 corrections
+        xg_mod_a, xg_mod_b = self._adjust_xg_for_lineups(team_a, team_b, lineups)
+        
+        # 进攻阵型倾向更高比分 → 调高双方胜率、降低平局
+        if xg_mod_a > 1.0 and xg_mod_b < 1.0:
+            corrections['a'] = corrections.get('a', 0) + 0.05
+            corrections['draw'] = corrections.get('draw', 0) - 0.03
+        elif xg_mod_b > 1.0 and xg_mod_a < 1.0:
+            corrections['b'] = corrections.get('b', 0) + 0.05
+            corrections['draw'] = corrections.get('draw', 0) - 0.03
+        elif xg_mod_a > 1.0 and xg_mod_b > 1.0:
+            corrections['a'] = corrections.get('a', 0) + 0.02
+            corrections['b'] = corrections.get('b', 0) + 0.02
+            corrections['draw'] = corrections.get('draw', 0) - 0.02
+        
+        # 步骤3: 执行预测（此时 Elo 已被临时替换）
+        prediction = self.predict(team_a, team_b, corrections, is_knockout, tournament_round)
+        
+        # 步骤4: 恢复原始 Elo
+        self.elo_ratings[team_a] = orig_elo_a
+        self.elo_ratings[team_b] = orig_elo_b
+        
+        # 注入实时数据上下文
+        prediction['live_data'] = {
+            'used': True,
+            'elo_adjusted': (elo_a_adj, elo_b_adj),
+            'elo_original': (orig_elo_a, orig_elo_b),
+            'xg_modifiers': (xg_mod_a, xg_mod_b),
+            'injuries': {
+                'available': injuries.get('available', False),
+                'summary': injuries.get('impact_summary', '')
+            },
+            'lineups': {
+                'available': lineups.get('available', False),
+                'has_official': lineups.get('has_official', False)
+            }
+        }
+        
+        return prediction
+    
+    def _adjust_elo_for_injuries(self, team_a: str, team_b: str,
+                                  injuries: Dict) -> Tuple[float, float]:
+        """根据伤停信息调整 Elo 评级
+        
+        规则:
+        - 每缺阵1人: Elo -15 (核心缺阵影响更大)
+        - 每存疑1人: Elo -5
+        - 最多影响 -60 Elo
+        """
+        elo_a = self.elo_ratings.get(team_a, 1500)
+        elo_b = self.elo_ratings.get(team_b, 1500)
+        
+        if not injuries or not injuries.get('available'):
+            return elo_a, elo_b
+        
+        # 主队伤病扣减
+        impact_a = injuries.get('home_out_count', 0) * 15 + \
+                   injuries.get('home_doubtful_count', 0) * 5
+        impact_a = min(impact_a, 60)
+        
+        # 客队伤病扣减
+        impact_b = injuries.get('away_out_count', 0) * 15 + \
+                   injuries.get('away_doubtful_count', 0) * 5
+        impact_b = min(impact_b, 60)
+        
+        return elo_a - impact_a, elo_b - impact_b
+    
+    def _adjust_xg_for_lineups(self, team_a: str, team_b: str,
+                                lineups: Dict) -> Tuple[float, float]:
+        """根据首发阵容调整 xG 系数
+        
+        规则:
+        - 进攻阵型(4-3-3): xG +10%
+        - 防守阵型(5-4-1/5-3-2): xG -10%
+        - 标准阵型(4-4-2/4-2-3-1): 不变
+        - 阵容不可用: 不影响
+        """
+        if not lineups or not lineups.get('available'):
+            return 1.0, 1.0
+        
+        mod_a = self._formation_xg_modifier(
+            (lineups.get('home') or {}).get('formation', '')
+        )
+        mod_b = self._formation_xg_modifier(
+            (lineups.get('away') or {}).get('formation', '')
+        )
+        
+        return mod_a, mod_b
+    
+    def _formation_xg_modifier(self, formation: str) -> float:
+        """阵型 → xG 修正系数"""
+        if not formation:
+            return 1.0
+        
+        attacking = ['4-3-3', '3-4-3', '3-5-2', '4-2-4']
+        defensive = ['5-4-1', '5-3-2', '4-5-1', '5-2-3']
+        
+        if any(f in formation for f in attacking):
+            return 1.10
+        if any(f in formation for f in defensive):
+            return 0.90
+        return 1.0
+    
+    # ============================================
+    # v3.0 原始预测方法
+    # ============================================
+    
     def monte_carlo_path(self, team: str, stages: List[Dict], 
                          simulations: int = 100000) -> Dict:
         import random

@@ -184,15 +184,78 @@ class PostMatchReviewer:
         return scores
     
     # ============================================
-    # 复盘执行
+    # v3.0 阵容/伤停复盘维度
+    # ============================================
+    
+    def score_live_context(self, live_data: Dict, actual_score: Tuple[int,int]) -> Dict:
+        """评估实时数据（阵容/伤停）对预测的加成效果
+        
+        Returns:
+            {'bonus': int, 'notes': str} — 加成分数（0-10）和说明
+        """
+        if not live_data or not live_data.get('used'):
+            return {'bonus': 0, 'notes': '未使用实时数据'}
+        
+        bonus = 0
+        notes = []
+        
+        # 伤病信息可用且影响显著
+        injuries = live_data.get('injuries', {})
+        if injuries.get('available'):
+            summary = injuries.get('summary', '')
+            note_key = 'injuries'
+            if summary:
+                notes.append(f"伤停: {summary}")
+            bonus += 3
+        
+        # 阵容信息可用
+        lineups = live_data.get('lineups', {})
+        if lineups.get('available') and lineups.get('has_official'):
+            notes.append("官方首发已获取")
+            bonus += 2
+        
+        # 如果实时数据帮助修正了预测方向，额外加分
+        # (通过对比 live_data 中的 Elo 调整是否趋近真实结果)
+        elo_adj = live_data.get('elo_adjusted')
+        elo_orig = live_data.get('elo_original')
+        if elo_adj and elo_orig:
+            ga, gb = actual_score
+            if ga > gb:
+                actual_favors_a = True
+            elif gb > ga:
+                actual_favors_a = False
+            else:
+                actual_favors_a = None
+            
+            if actual_favors_a is not None:
+                # 调整是否更接近真实实力差
+                orig_diff = elo_orig[0] - elo_orig[1]
+                adj_diff = elo_adj[0] - elo_adj[1]
+                
+                if actual_favors_a and adj_diff < orig_diff:
+                    # 真实A赢，但A被伤病降级→说明调整后更保守=合理
+                    notes.append("伤病修正方向合理")
+                    bonus += 2
+                elif not actual_favors_a and adj_diff > orig_diff:
+                    notes.append("伤病修正方向合理")
+                    bonus += 2
+        
+        return {
+            'bonus': min(bonus, 10),
+            'notes': '; '.join(notes) if notes else '无特殊加成'
+        }
+    
+    # ============================================
+    # 复盘执行（增强版）
     # ============================================
     
     def review_match(self, team_a: str, team_b: str,
                      actual_score: Tuple[int, int],
                      prediction: Dict,
                      odds_data: Optional[Dict] = None,
-                     match_context: Optional[Dict] = None) -> Dict:
-        """执行单场复盘
+                     match_context: Optional[Dict] = None,
+                     live_data: Optional[Dict] = None) -> Dict:
+        """执行单场复盘（v3.0 含实时数据维度）
         
         Args:
             team_a, team_b: 球队名
@@ -249,11 +312,19 @@ class PostMatchReviewer:
             'scores': scores,
             'calibration': calibration,
             'elo_changes': {
-                team_a: f"{old_elo_a} → {new_elo_a} ({'+' if new_elo_a > old_elo_a else ''}{new_elo_a - old_elo_a})",
-                team_b: f"{old_elo_b} → {new_elo_b} ({'+' if new_elo_b > old_elo_b else ''}{new_elo_b - old_elo_b})"
+                team_a: f"{old_elo_a} -> {new_elo_a} ({'+' if new_elo_a > old_elo_a else ''}{new_elo_a - old_elo_a})",
+                team_b: f"{old_elo_b} -> {new_elo_b} ({'+' if new_elo_b > old_elo_b else ''}{new_elo_b - old_elo_b})"
             },
             'evolution_actions': self._generate_evolution_actions(calibration, scores, prediction)
         }
+        
+        # v3.0: 实时数据维度评分
+        if live_data:
+            live_score = self.score_live_context(live_data, actual_score)
+            review['live_context'] = live_score
+            # 将加成分数合并到总分
+            review['scores']['live_bonus'] = live_score['bonus']
+            review['scores']['total_with_live'] = review['scores']['total'] + live_score['bonus']
         
         # 记录到日志
         self.review_log.append(review)
