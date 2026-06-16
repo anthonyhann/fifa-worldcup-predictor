@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated logs (keep structure, ignore content)
+logs/*.json
+logs/*.jsonl
+logs/evolution_state.json
+logs/profit_state.json
+!logs/.gitkeep
+
+# Skill packaging artifacts
+*.zip
+_meta.json
+_skillhub_meta.json
