@@ -29,12 +29,14 @@ DEFENSE_EXTREME_THRESHOLD = 0.5
 
 
 class FootballPredictionEngine:
-    """足球比赛预测引擎"""
+    """足球比赛预测引擎 v3.2+"""
     
     def __init__(self, data_dir: str = None):
         self.elo_ratings = {}
         self.team_stats = {}
         self.prediction_log = []
+        # v4.0: 可被进化引擎注入的自定义轮次系数
+        self._round_coefficients = None
         
         if data_dir:
             self.load_data(data_dir)
@@ -51,6 +53,18 @@ class FootballPredictionEngine:
         if os.path.exists(stats_path):
             with open(stats_path, 'r', encoding='utf-8') as f:
                 self.team_stats = json.load(f)
+    
+    def set_round_coefficients(self, coefficients: Dict):
+        """v4.0: 接受进化引擎注入的自定义轮次系数
+        
+        Args:
+            coefficients: {
+                'group_stage_round1': {'fav_discount': 0.50, 'underdog_boost': 0.40, 'draw_boost': 0.15},
+                'group_stage_round2': {'fav_discount': 1.10, 'underdog_boost': -0.20, 'draw_boost': -0.10},
+                ...
+            }
+        """
+        self._round_coefficients = coefficients
     
     def elo_expected(self, elo_a: float, elo_b: float) -> float:
         return 1 / (1 + 10 ** ((elo_b - elo_a) / 400))
@@ -77,17 +91,18 @@ class FootballPredictionEngine:
             if defense_a < DEFENSE_EXTREME_THRESHOLD:
                 defense_a = defense_a * (1 - DEFENSE_REGRESSION) + 1.0 * DEFENSE_REGRESSION
         
-        # v2.0/v2.1修正: 大赛轮次自适应xG修正
+        # v2.0/v2.1/v4.0修正: 大赛轮次自适应xG修正
         # 2026-06-16复盘: 首轮4场全平，强队xG被高估
         # 2026-06-17复盘: 第2轮4场3穿盘，强队xG被严重低估
+        # v4.0: 进化引擎可注入自定义系数，优先使用注入值
         # 结论: 不同轮次强队表现差异巨大，需要按轮次调整
         if tournament_round in ['group_stage_round1', 'group_stage_round2',
                                'group_stage_round3', 'knockout_stage']:
             elo_a = self.elo_ratings.get(team_a, 1500)
             elo_b = self.elo_ratings.get(team_b, 1500)
             
-            # 轮次对应系数 (基于两轮复盘数据校准)
-            round_coefficients = {
+            # v4.0: 优先使用进化引擎注入的自定义系数，否则用默认硬编码
+            round_coefficients = self._round_coefficients if self._round_coefficients else {
                 'group_stage_round1': {
                     'fav_discount': 0.50,    # 首轮强队折半(谨慎/未热身)
                     'underdog_boost': 0.40,  # 首轮弱队加成(状态佳)

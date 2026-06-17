@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.2-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-4.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="license">
   <img src="https://img.shields.io/badge/data-live%20odds%20%2B%20lineups%20%2B%20injuries-red" alt="live data">
