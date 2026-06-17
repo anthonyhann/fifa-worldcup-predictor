@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-3.1-blue" alt="version">
+  <img src="https://img.shields.io/badge/版本-3.2-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
   <img src="https://img.shields.io/badge/许可证-MIT-yellow" alt="license">
   <img src="https://img.shields.io/badge/数据-实时阵容%20%2B%20伤停%20%2B%20赔率-red" alt="live data">
@@ -30,10 +30,10 @@
 ### :crystal_ball: 赛前预测
 
 - **预测胜平负概率**，给出最可能出现的比分
-- **提前发现爆冷迹象** —— 当弱队因为风格克制或赛制红利真有取胜机会时会标记出来
+- **轮次自适应预测** — R1保守(×0.5) → R2反弹(×1.10) → R3常态 → 淘汰赛防守 (v3.2)
+- **三层爆冷检测** — 风格克制 + 状态变量 + 赛制红利，Tier 1/2/3 分级预警
 - **模拟晋级路线**，看每支球队进八强、四强、决赛的概率
 - **找出被错误定价的赔率** —— 当模型判断和博彩市场明显不一致时提醒你
-- **生成比赛剧本**，不只给数字，也描绘比赛可能怎么演变
 
 ### :satellite: 实时数据（v3.1 新增）
 
@@ -154,6 +154,8 @@ fifa-worldcup-predictor/
 ## :construction: 计划路线
 
 - [x] ~~实时数据接入 —— 伤停报告、首发公布、实时赔率~~ :tada:
+- [x] ~~轮次自适应修正 —— R1→R2→R3→淘汰赛动态系数~~ :tada:
+- [x] ~~爆冷分析升级 —— 三层判据 + Tier 1/2/3 分级~~ :tada:
 - [ ] 支持更多赛事（欧洲杯、美洲杯、各国联赛）
 - [ ] 更细致的战术模型 —— 球员级别追踪、定位球概率
 - [ ] 更多仓位策略 —— 分级 Kelly、置信度加权

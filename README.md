@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.1-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-3.2-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="license">
   <img src="https://img.shields.io/badge/data-live%20odds%20%2B%20lineups%20%2B%20injuries-red" alt="live data">
@@ -28,10 +28,10 @@ Like an analyst who never stops studying film.
 ### :crystal_ball: Before the match
 
 - **Predict win/draw/loss** odds plus the most likely final score
-- **Spot potential upsets** — when a weaker team has a real shot due to style mismatches or tournament context
+- **Adapt per tournament round** — R1 conservative (×0.5), R2 bounce-back (×1.10), R3 normal, KO defensive (v3.2)
+- **Spot potential upsets** with 3-layer detection — style mismatch, form variance, tournament edge
 - **Simulate tournament paths** to see each team's odds of reaching the quarters, semis, or final
 - **Find mispriced odds** — flags when the model disagrees with the market by a meaningful margin
-- **Generate match scenarios** — not just numbers, but narratives about how the game might play out
 
 ### :satellite: Live data (new in v3.1)
 
@@ -152,6 +152,8 @@ fifa-worldcup-predictor/
 ## :construction: Roadmap
 
 - [x] ~~Live data — injury reports, lineup announcements, real-time odds~~ :tada:
+- [x] ~~Round-adaptive correction — R1→R2→R3→KO dynamic coefficients~~ :tada:
+- [x] ~~Upset analysis — 3-layer detection with Tier 1/2/3 classification~~ :tada:
 - [ ] Support for more tournaments (Euro, Copa America, domestic leagues)
 - [ ] Richer tactical models — player-level tracking, set-piece probabilities
 - [ ] More staking strategies — fractional Kelly variants, confidence-weighted scaling

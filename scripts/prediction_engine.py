@@ -1,9 +1,16 @@
 """
-足球预测引擎 v3.0 — FIFA世界杯预测计算器
-模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化
+足球预测引擎 v3.2 — FIFA世界杯预测计算器
+模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
 v1.1修正: 单场决赛极端防守系数均值回归30%
 v2.0修正: 大赛首轮xG修正(2026-06-16复盘，4场全平验证)
+v2.1修正: 轮次自适应(2026-06-17复盘，4场3穿盘反向验证)
+  - 取消统一首轮修正
+  - 新增 group_stage_round2: 强队反弹系数1.10(打出血性)
+  - 新增 group_stage_round3: 接近常规状态
+  - 新增 knockout_stage: 强队稍弱队0.95(淘汰赛防守)
 v3.0新增: Elo动态更新 + 赛后校准 + 进化日志接口
+v3.1新增: 实时数据集成(阵容/伤停/赔率)
+v3.2新增: 爆冷分析模块(三层判据) + 轮次自适应全面进化
 """
 
 import math
@@ -70,23 +77,47 @@ class FootballPredictionEngine:
             if defense_a < DEFENSE_EXTREME_THRESHOLD:
                 defense_a = defense_a * (1 - DEFENSE_REGRESSION) + 1.0 * DEFENSE_REGRESSION
         
-        # v2.0修正: 大赛首轮进球修正（2026-06-16复盘）
-        # 4场世界杯首轮100%打平，强队xG严重高估，弱队xG被低估
-        if tournament_round == 'group_stage_round1':
+        # v2.0/v2.1修正: 大赛轮次自适应xG修正
+        # 2026-06-16复盘: 首轮4场全平，强队xG被高估
+        # 2026-06-17复盘: 第2轮4场3穿盘，强队xG被严重低估
+        # 结论: 不同轮次强队表现差异巨大，需要按轮次调整
+        if tournament_round in ['group_stage_round1', 'group_stage_round2',
+                               'group_stage_round3', 'knockout_stage']:
             elo_a = self.elo_ratings.get(team_a, 1500)
             elo_b = self.elo_ratings.get(team_b, 1500)
             
-            # 强队（高Elo方）进球打折
-            FAV_GOAL_DISCOUNT = 0.50  # 首轮强队进球能力折半
-            UNDERDOG_GOAL_BOOST = 0.40  # 首轮弱队进球加成
+            # 轮次对应系数 (基于两轮复盘数据校准)
+            round_coefficients = {
+                'group_stage_round1': {
+                    'fav_discount': 0.50,    # 首轮强队折半(谨慎/未热身)
+                    'underdog_boost': 0.40,  # 首轮弱队加成(状态佳)
+                    'draw_boost': 0.15       # 首轮平局上调
+                },
+                'group_stage_round2': {
+                    'fav_discount': 1.10,    # 第2轮强队反弹+10%(打出血性)
+                    'underdog_boost': -0.20, # 第2轮弱队-0.20(回归常态)
+                    'draw_boost': -0.10      # 第2轮平局下调
+                },
+                'group_stage_round3': {
+                    'fav_discount': 1.00,    # 第3轮接近常态
+                    'underdog_boost': 0.00,
+                    'draw_boost': -0.05
+                },
+                'knockout_stage': {
+                    'fav_discount': 0.95,    # 淘汰赛强队略打折(防守更严)
+                    'underdog_boost': 0.10,  # 弱队稍加成
+                    'draw_boost': 0.05       # 淘汰赛更可能平
+                }
+            }
+            
+            coeffs = round_coefficients[tournament_round]
             
             if elo_a > elo_b:
-                # 强队a打折，弱队b加成
-                attack_a *= FAV_GOAL_DISCOUNT
-                attack_b += UNDERDOG_GOAL_BOOST / LEAGUE_AVG_GOALS
+                attack_a *= coeffs['fav_discount']
+                attack_b += coeffs['underdog_boost'] / LEAGUE_AVG_GOALS
             elif elo_b > elo_a:
-                attack_b *= FAV_GOAL_DISCOUNT
-                attack_a += UNDERDOG_GOAL_BOOST / LEAGUE_AVG_GOALS
+                attack_b *= coeffs['fav_discount']
+                attack_a += coeffs['underdog_boost'] / LEAGUE_AVG_GOALS
             # else: Elo相等，不修正
         
         xg_a = LEAGUE_AVG_GOALS * attack_a * defense_b
@@ -132,16 +163,22 @@ class FootballPredictionEngine:
         combined_draw = (1 - abs(elo_exp_a - 0.5)) * 0.15 + poisson['draw'] * POISSON_WEIGHT
         combined_b = (1 - elo_exp_a) * ELO_WEIGHT + poisson['win_b'] * POISSON_WEIGHT
         
-        # v2.0修正: 大赛首轮平局概率上调
-        DRAW_BOOST_OPENER = 0.15
-        if tournament_round == 'group_stage_round1':
-            combined_draw += DRAW_BOOST_OPENER
-            # 从胜和负中各抽取一半补给平局
-            combined_a -= DRAW_BOOST_OPENER / 2
-            combined_b -= DRAW_BOOST_OPENER / 2
+        # v2.1修正: 大赛平局概率按轮次调整
+        DRAW_BOOST_BY_ROUND = {
+            'group_stage_round1': 0.15,  # 首轮平局+15%
+            'group_stage_round2': -0.10, # 第2轮平局-10%(打出血性)
+            'group_stage_round3': -0.05, # 第3轮稍降
+            'knockout_stage': 0.05       # 淘汰赛平局+5%
+        }
+        if tournament_round in DRAW_BOOST_BY_ROUND:
+            draw_boost = DRAW_BOOST_BY_ROUND[tournament_round]
+            combined_draw += draw_boost
+            # 从胜和负中各抽取一半补给平局（正）或反向（负）
+            combined_a -= draw_boost / 2
+            combined_b -= draw_boost / 2
             combined_a = max(0.01, combined_a)
             combined_b = max(0.01, combined_b)
-            combined_draw = min(0.90, combined_draw)
+            combined_draw = max(0.05, min(0.90, combined_draw))
         
         total = combined_a + combined_draw + combined_b
         combined_a /= total; combined_draw /= total; combined_b /= total
@@ -361,9 +398,9 @@ class FootballPredictionEngine:
         total = raw_a + raw_d + raw_b
         vig = total - 1
         return {
-            'prob_a': round(raw_a / total * 100, 1),
-            'prob_draw': round(raw_d / total * 100, 1),
-            'prob_b': round(raw_b / total * 100, 1),
+            'win_a': round(raw_a / total * 100, 1),
+            'draw': round(raw_d / total * 100, 1),
+            'win_b': round(raw_b / total * 100, 1),
             'vig': round(vig * 100, 1)
         }
     
@@ -385,6 +422,116 @@ class FootballPredictionEngine:
     def kelly(prob: float, odds: float, fraction: float = 0.5) -> float:
         full_kelly = (prob * odds - 1) / (odds - 1)
         return max(0, full_kelly * fraction)
+    
+    # ============================================
+    # v3.2 爆冷分析模块 (来自 football-match-analysis v2.1)
+    # ============================================
+    
+    def upset_analysis(self, team_a: str, team_b: str,
+                       match_context: Dict = None,
+                       tournament_round: str = None) -> Dict:
+        """爆冷分析 — 基于三层判据：风格克制、状态变量、赛制红利
+        
+        Args:
+            team_a, team_b: 球队名
+            match_context: 比赛上下文
+                - is_first_match: 小组首轮
+                - is_last_group_match: 末轮
+                - rotation_risk: 强队可能轮换
+                - expansion_format: 48队扩军赛制
+                - internal_strife: 强队存在内讧
+                - key_injury: 强队核心伤缺
+                - slow_starter: 强队历来慢热
+            tournament_round: 比赛轮次 (group_stage_round1/2/3, knockout_stage)
+        
+        Returns:
+            爆冷分析报告，含基础/调整后概率、修正详情、等级判定
+        """
+        match_context = match_context or {}
+        
+        # 确定强队和弱队（基于Elo）
+        elo_a = self.elo_ratings.get(team_a, 1500)
+        elo_b = self.elo_ratings.get(team_b, 1500)
+        favorite = team_a if elo_a >= elo_b else team_b
+        underdog = team_b if favorite == team_a else team_a
+        elo_gap = abs(elo_a - elo_b)
+        
+        # 基础预测
+        base_pred = self.predict(team_a, team_b, tournament_round=tournament_round)
+        underdog_key = 'win_b' if favorite == team_a else 'win_a'
+        draw_key = 'draw'
+        base_upset_prob = base_pred['final'][underdog_key] / 100.0
+        base_draw_prob = base_pred['final'][draw_key] / 100.0
+        
+        # 三层爆冷修正
+        corrections = {'style': 0, 'status': 0, 'format': 0}
+        
+        # 1. 风格克制修正
+        stats_fav = self.team_stats.get(favorite, {
+            'avg_goals': LEAGUE_AVG_GOALS, 'avg_conceded': LEAGUE_AVG_GOALS
+        })
+        stats_und = self.team_stats.get(underdog, {
+            'avg_goals': LEAGUE_AVG_GOALS, 'avg_conceded': LEAGUE_AVG_GOALS
+        })
+        
+        # 攻强守弱（场均进球>1.8且失球>0.9）遇铁桶（弱队失球<0.9）
+        if stats_fav['avg_goals'] > 1.8 and stats_fav['avg_conceded'] > 0.9 \
+           and stats_und['avg_conceded'] < 0.9:
+            corrections['style'] += 0.04
+        
+        # 弱队反击型 vs 控球型强队
+        if stats_und['avg_goals'] > 1.3 and stats_und['avg_conceded'] < 1.0 \
+           and stats_fav['avg_goals'] > 2.0:
+            corrections['style'] += 0.03
+        
+        # 2. 状态变量修正
+        if match_context.get('internal_strife'):
+            corrections['status'] -= 0.04
+        if match_context.get('key_injury'):
+            corrections['status'] -= 0.03
+        if match_context.get('slow_starter'):
+            corrections['status'] += 0.02
+        
+        # 3. 赛制红利修正
+        if match_context.get('is_first_match'):
+            corrections['format'] += 0.03
+        if match_context.get('rotation_risk'):
+            corrections['format'] += 0.06
+        if match_context.get('is_last_group_match'):
+            corrections['format'] += 0.02
+        if match_context.get('expansion_format'):
+            corrections['format'] += 0.03
+        
+        total_correction = corrections['style'] + corrections['status'] + corrections['format']
+        
+        adjusted_upset = min(0.95, base_upset_prob + total_correction)
+        adjusted_draw = min(0.50, base_draw_prob + abs(corrections['status']) * 0.3)
+        
+        # 爆冷等级判定
+        upset_combined = adjusted_upset + adjusted_draw * 0.5
+        if upset_combined >= 0.40:
+            tier = "Tier 1 - 高概率爆冷"
+        elif upset_combined >= 0.30:
+            tier = "Tier 2 - 中概率爆冷"
+        elif upset_combined >= 0.20:
+            tier = "Tier 3 - 值得盯的暗冷"
+        else:
+            tier = "常规 - 爆冷概率低"
+        
+        return {
+            'favorite': favorite,
+            'underdog': underdog,
+            'elo_gap': elo_gap,
+            'base_upset_prob': round(base_upset_prob * 100, 1),
+            'base_draw_prob': round(base_draw_prob * 100, 1),
+            'corrections': {k: round(v * 100, 1) for k, v in corrections.items()},
+            'total_correction': round(total_correction * 100, 1),
+            'adjusted_upset_prob': round(adjusted_upset * 100, 1),
+            'adjusted_draw_prob': round(adjusted_draw * 100, 1),
+            'upset_combined': round(upset_combined * 100, 1),
+            'tier': tier,
+            'key_factors': [f for f, v in corrections.items() if abs(v) >= 0.01]
+        }
     
     # ============================================
     # v3.0 自我进化方法
@@ -497,96 +644,6 @@ class FootballPredictionEngine:
         alpha = 0.3
         stats['avg_goals'] = round(stats['avg_goals'] * (1 - alpha) + goals_for * alpha, 2)
         stats['avg_conceded'] = round(stats['avg_conceded'] * (1 - alpha) + goals_against * alpha, 2)
-
-
-    def upset_analysis(self, team_a: str, team_b: str,
-                       match_context: Dict = None) -> Dict:
-        """爆冷分析模块 v1.0 (2026世界杯)
-
-        基于三层判据：风格克制、状态变量、赛制红利
-        返回爆冷概率和关键因素
-        """
-        match_context = match_context or {}
-
-        # 确定强队和弱队（基于Elo）
-        elo_a = self.elo_ratings.get(team_a, 1500)
-        elo_b = self.elo_ratings.get(team_b, 1500)
-        favorite = team_a if elo_a >= elo_b else team_b
-        underdog = team_b if favorite == team_a else team_a
-        elo_gap = abs(elo_a - elo_b)
-
-        # 基础预测（final字段已是百分比0-100，转为0-1概率）
-        base_pred = self.predict(team_a, team_b)
-        underdog_key = 'win_b' if favorite == team_a else 'win_a'
-        draw_key = 'draw'
-        base_upset_prob = base_pred['final'][underdog_key] / 100.0
-        base_draw_prob = base_pred['final'][draw_key] / 100.0
-
-        # 三层爆冷修正
-        corrections = {'style': 0, 'status': 0, 'format': 0}
-
-        # 1. 风格克制修正
-        stats_fav = self.team_stats.get(favorite, {'avg_goals': LEAGUE_AVG_GOALS, 'avg_conceded': LEAGUE_AVG_GOALS})
-        stats_und = self.team_stats.get(underdog, {'avg_goals': LEAGUE_AVG_GOALS, 'avg_conceded': LEAGUE_AVG_GOALS})
-
-        # 攻强守弱（场均进球>1.8且失球>0.9）遇铁桶（弱队失球<0.9）
-        if stats_fav['avg_goals'] > 1.8 and stats_fav['avg_conceded'] > 0.9 and stats_und['avg_conceded'] < 0.9:
-            corrections['style'] += 0.04  # 铁桶克攻强守弱
-
-        # 弱队反击型（进球>1.3且失球<1.0）vs 控球型强队
-        if stats_und['avg_goals'] > 1.3 and stats_und['avg_conceded'] < 1.0 and stats_fav['avg_goals'] > 2.0:
-            corrections['style'] += 0.03  # 反击克控球
-
-        # 2. 状态变量修正
-        if match_context.get('internal_strife'):
-            corrections['status'] -= 0.04  # 强队内讧
-        if match_context.get('key_injury'):
-            corrections['status'] -= 0.03  # 强队核心伤缺
-        if match_context.get('slow_starter'):
-            corrections['status'] += 0.02  # 强队历来小组赛慢热
-
-        # 3. 赛制红利修正
-        if match_context.get('is_first_match'):
-            corrections['format'] += 0.03  # 首轮不确定性
-        if match_context.get('rotation_risk'):
-            corrections['format'] += 0.06  # 末轮轮换
-        if match_context.get('is_last_group_match'):
-            corrections['format'] += 0.02  # 末轮算分
-        if match_context.get('expansion_format'):
-            corrections['format'] += 0.03  # 48队扩军红利
-
-        total_correction = corrections['style'] + corrections['status'] + corrections['format']
-
-        adjusted_upset = min(0.95, base_upset_prob + total_correction)
-        adjusted_draw = min(0.50, base_draw_prob + abs(corrections['status']) * 0.3)
-
-        # 爆冷等级判定
-        upset_combined = adjusted_upset + adjusted_draw * 0.5
-        if upset_combined >= 0.40:
-            tier = "Tier 1 - 高概率爆冷"
-        elif upset_combined >= 0.30:
-            tier = "Tier 2 - 中概率爆冷"
-        elif upset_combined >= 0.20:
-            tier = "Tier 3 - 值得盯的暗冷"
-        else:
-            tier = "常规 - 爆冷概率低"
-
-        return {
-            'favorite': favorite,
-            'underdog': underdog,
-            'elo_gap': elo_gap,
-            'base_upset_prob': round(base_upset_prob * 100, 1),
-            'base_draw_prob': round(base_draw_prob * 100, 1),
-            'corrections': {k: round(v * 100, 1) for k, v in corrections.items()},
-            'total_correction': round(total_correction * 100, 1),
-            'adjusted_upset_prob': round(adjusted_upset * 100, 1),
-            'adjusted_draw_prob': round(adjusted_draw * 100, 1),
-            'upset_combined': round(upset_combined * 100, 1),
-            'tier': tier,
-            'key_factors': [
-                f for f, v in corrections.items() if abs(v) >= 0.01
-            ]
-        }
 
 
 if __name__ == "__main__":
