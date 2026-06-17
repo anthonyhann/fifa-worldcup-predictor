@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-3.2-blue" alt="version">
+  <img src="https://img.shields.io/badge/版本-4.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
   <img src="https://img.shields.io/badge/许可证-MIT-yellow" alt="license">
   <img src="https://img.shields.io/badge/数据-实时阵容%20%2B%20伤停%20%2B%20赔率-red" alt="live data">
