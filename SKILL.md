@@ -18,6 +18,7 @@ description: 国际足联世界杯（FIFA World Cup）足球预测计算器 — 
 | v3.1 | — | 实时数据集成（阵容/伤停/赔率） | BSD API赛前数据增强 |
 | v3.2 | — | 爆冷分析模块（三层判据+Tier分级） | 风格克制+状态变量+赛制红利 |
 | **v4.0** | **2026-06-17** | **进化引擎轮次自适应+回测验证+过拟合防御** | 不能让单次复盘绑架全局参数 |
+| **v4.1** | **2026-06-22** | **meyo123 Loop Engine + worldcup2026 API** | 全自动流水线 + 开源实时比分接入 |
 
 ### 核心规律（v2.1 验证，v4.0 固化为可进化参数）
 
@@ -297,6 +298,51 @@ python scripts/evolution_engine.py --backtest
 📊 回测验证: 总偏差X | 方向准确率Y%
 ```
 
+## meyo123 绿茵钳王预测闭环流水线（v4.1）
+
+本技能已集成到 meyo123 绿茵钳王 · 预测争霸赛的 Loop Engineering 流水线中：
+
+```
+每日 17:50 (北京时间) 触发 (footballforecast-daily-001)
+    ↓
+┌─ 第1步: 拉开奖结果 (GET /records, filtered settledAt > last_run_at)
+├─ 第2步: 对比预测登记表 vs 实际结果 → 战报
+│         evolution_engine.evolve() 自动校准 (回测+过拟合防御)
+│         ├─ 参数变更 (轮次系数/ELO_WEIGHT/K_FACTOR)
+│         ├─ 过拟合检测 (相邻轮次反向/单次变化过大)
+│         └─ 进化报告
+├─ 第3步: 拉公告 (POST /heartbeat)
+├─ 第4步: 拉明天全天赛事 (closeTime ∈ [明天00:00, 23:59])
+│         WebSearch 收集阵容/伤停/赔率/专家预测消息面
+├─ 第5步: prediction_engine.predict() 批量预测
+│         ├─ win_lose_draw: max(final.win_a, final.draw, final.win_b)
+│         ├─ score: top_scores[0] (dash→colon格式转换)
+│         └─ total_goals: poisson极值 (xg_a+xg_b)
+│         POST /predict 自动提交到 meyo123
+└─ 第6步: 登记预测到 prediction_register.json (含消息面交叉验证)
+    ↓
+等待下次开奖 → 验证 → 进化 → 周而复始
+```
+
+**关键文件**:
+- `prediction_register.json` — 已提交预测登记表 + 消息面研究 (`~/.openclaw/meyo/`)
+- `footballforecast-state.json` — Loop去重状态 (`~/.openclaw/meyo/`)
+- `logs/review_log.jsonl` — 复盘数据 (skill 目录)
+- `logs/evolution_state.json` — 进化状态 (skill 目录)
+
+**数据源**:
+- 量化预测: Elo + 泊松 + team_stats (内置)
+- 消息面: WebSearch (阵容/伤停/专家/赔率)
+- **实时比分: `rezarahiminia/worldcup2026` (免认证 REST API, 104场世界杯数据)**
+  - 已集成 `live_data_fetcher.py` v2.1 → 赛后复盘自动化
+  - 支持按队名查比分、积分榜、赛程
+
+**流水线红线（meyo123 SOP 红线叠加）**:
+- 自动提交模式需用户明确开启 ✅
+- 预测不可撤回，每个 market 只能提交一次
+- 429 必须读 Retry-After
+- 预测登记必须在提交后立即执行
+
 ## 红线
 
 - 绝不直接建议投注，提供分析框架
@@ -308,3 +354,4 @@ python scripts/evolution_engine.py --backtest
 - 所有数据缺失必须标记为 UNAVAILABLE 并说明原因
 - **v4.0新增：轮次必须从赛程文件读取，不能凭直觉判断**
 - **v4.0新增：进化时禁止单次复盘结论推广到所有轮次**
+- **v4.1新增：API Key 只发往 meyo123，进化只改 skill 内部参数不改提交逻辑**
