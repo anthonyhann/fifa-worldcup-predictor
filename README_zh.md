@@ -5,10 +5,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-4.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/版本-4.1-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
   <img src="https://img.shields.io/badge/许可证-MIT-yellow" alt="license">
   <img src="https://img.shields.io/badge/数据-实时阵容%20%2B%20伤停%20%2B%20赔率-red" alt="live data">
+  <img src="https://img.shields.io/badge/比分-worldcup2026%20REST%20API-orange" alt="live scores">
 </p>
 
 > :us: English version: [README.md](README.md)
@@ -44,15 +45,24 @@
 
 > 基于 [BSD Free Football API](https://sports.bzzoiro.com/)。设置 `BSD_API_KEY` 环境变量即可使用 —— 完全免费，无调用次数限制。
 
+### :satellite: 实时比分（v4.1 新增）
+
+- **赛后实时比分** 接入 [rezarahiminia/worldcup2026](https://github.com/rezarahiminia/worldcup2026) —— 免认证 REST API，覆盖全部 104 场世界杯比赛
+- **自动复盘** —— 赛后抓取真实比分，自动喂入复盘引擎
+- **积分榜 & 赛程** 按队名查询
+
 ### :bar_chart: 赛后复盘
 
 - **自动复盘**，联网搜索真实比分跟预测做对比
 - **给自己打分**（100 分制），从胜负方向、比分精度、进球预测、价值判断四个维度
 - **更新球队实力评级**，反映真实比赛表现
 
-### :dna: 自我进化
+### :dna: 自我进化（v4.0+ 增强）
 
-- **积累足够场次后自动校准** —— 根据历史预测偏差调整内部参数
+- **积累足够场次后自动校准** —— 按轮次独立优化参数
+- **轮次自适应** —— R1/R2/R3/淘汰赛各有独立系数，互不干扰
+- **过拟合防御** —— 检测相邻轮次反向超过 0.45、单次变化超过 0.20 时预警
+- **回测验证** —— 用历史复盘数据验证新参数，防止退化
 - **追踪准确率变化趋势**，一眼看出预测质量是在变好还是变差
 - **模拟多种投注策略的盈亏**，看哪种方式真实比赛能赚钱
 
@@ -128,11 +138,12 @@ fifa-worldcup-predictor/
 ├── README_zh.md               # 中文版（当前文件）
 ├── scripts/
 │   ├── prediction_engine.py   # 赛前预测 + 实时数据集成
-│   ├── live_data_fetcher.py   # 阵容、伤停、赔率（BSD API）
+│   ├── live_data_fetcher.py   # 阵容、伤停、赔率（BSD API）+ 实时比分（worldcup2026）
+│   ├── wc2026_client.py       # worldcup2026 REST API 客户端（104 场数据集）
 │   ├── bsd_client.py          # BSD API 客户端
 │   ├── odds_fetcher.py        # 双源赔率（BSD + The Odds API）
 │   ├── post_match_review.py   # 赛后复盘 + 联网搜索
-│   ├── evolution_engine.py    # 自动校准
+│   ├── evolution_engine.py    # 自动校准（含过拟合防御）
 │   └── profit_tracker.py      # 投注模拟
 ├── data/                      # Elo 评级、球队统计、修正因子
 ├── references/                # 分析框架、校准方法论、集成方案
@@ -156,6 +167,8 @@ fifa-worldcup-predictor/
 - [x] ~~实时数据接入 —— 伤停报告、首发公布、实时赔率~~ :tada:
 - [x] ~~轮次自适应修正 —— R1→R2→R3→淘汰赛动态系数~~ :tada:
 - [x] ~~爆冷分析升级 —— 三层判据 + Tier 1/2/3 分级~~ :tada:
+- [x] ~~自我进化引擎 —— 自动校准 + 回测 + 过拟合防御~~（v4.0）:tada:
+- [x] ~~实时比分接入 —— worldcup2026 REST API 自动复盘~~（v4.1）:tada:
 - [ ] 支持更多赛事（欧洲杯、美洲杯、各国联赛）
 - [ ] 更细致的战术模型 —— 球员级别追踪、定位球概率
 - [ ] 更多仓位策略 —— 分级 Kelly、置信度加权

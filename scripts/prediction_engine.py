@@ -9,6 +9,11 @@ v2.1修正: 轮次自适应(2026-06-17复盘，4场3穿盘反向验证)
   - 新增 group_stage_round3: 接近常规状态
   - 新增 knockout_stage: 强队稍弱队0.95(淘汰赛防守)
 v3.0新增: Elo动态更新 + 赛后校准 + 进化日志接口
+v3.3修正: R1系数进化(2026-06-18复盘，4场方向全错+强队总体胜率75%)
+  - R1 fav_discount 0.50→0.65 (过度惩罚强队，纯Elo能猜对3/4场)
+  - R1 underdog_boost 0.40→0.25 (弱队加成过激进)
+  - R1 draw_boost 0.15→0.08 (平局回归25%均值)
+  - 关键洞察：0.50系数把4场全对的Elo预测全变成错的
 v3.1新增: 实时数据集成(阵容/伤停/赔率)
 v3.2新增: 爆冷分析模块(三层判据) + 轮次自适应全面进化
 """
@@ -104,9 +109,9 @@ class FootballPredictionEngine:
             # v4.0: 优先使用进化引擎注入的自定义系数，否则用默认硬编码
             round_coefficients = self._round_coefficients if self._round_coefficients else {
                 'group_stage_round1': {
-                    'fav_discount': 0.50,    # 首轮强队折半(谨慎/未热身)
-                    'underdog_boost': 0.40,  # 首轮弱队加成(状态佳)
-                    'draw_boost': 0.15       # 首轮平局上调
+                    'fav_discount': 0.65,    # v3.3: 首轮强队折扣(60%→65%，6/18复核强队胜率75%)
+                    'underdog_boost': 0.25,  # v3.3: 首轮弱队加成(0.40→0.25，实际弱队进球均值仅1.25)
+                    'draw_boost': 0.08       # v3.3: 首轮平局上调(0.15→0.08，回归25%平局均值)
                 },
                 'group_stage_round2': {
                     'fav_discount': 1.10,    # 第2轮强队反弹+10%(打出血性)
@@ -180,10 +185,10 @@ class FootballPredictionEngine:
         
         # v2.1修正: 大赛平局概率按轮次调整
         DRAW_BOOST_BY_ROUND = {
-            'group_stage_round1': 0.15,  # 首轮平局+15%
-            'group_stage_round2': -0.10, # 第2轮平局-10%(打出血性)
-            'group_stage_round3': -0.05, # 第3轮稍降
-            'knockout_stage': 0.05       # 淘汰赛平局+5%
+            'group_stage_round1': 0.08,   # v3.3: 首轮平局+8%(从15%下调，6/18平局率25%)
+            'group_stage_round2': -0.10,  # 第2轮平局-10%(打出血性)
+            'group_stage_round3': -0.05,  # 第3轮稍降
+            'knockout_stage': 0.05        # 淘汰赛平局+5%
         }
         if tournament_round in DRAW_BOOST_BY_ROUND:
             draw_boost = DRAW_BOOST_BY_ROUND[tournament_round]
