@@ -1,19 +1,17 @@
 """
-足球预测引擎 v3.2 — FIFA世界杯预测计算器
+足球预测引擎 v3.4 — FIFA世界杯预测计算器
 模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
+              + 市场共识融合 + R1→R2攻击动量
 v1.1修正: 单场决赛极端防守系数均值回归30%
 v2.0修正: 大赛首轮xG修正(2026-06-16复盘，4场全平验证)
 v2.1修正: 轮次自适应(2026-06-17复盘，4场3穿盘反向验证)
-  - 取消统一首轮修正
-  - 新增 group_stage_round2: 强队反弹系数1.10(打出血性)
-  - 新增 group_stage_round3: 接近常规状态
-  - 新增 knockout_stage: 强队稍弱队0.95(淘汰赛防守)
 v3.0新增: Elo动态更新 + 赛后校准 + 进化日志接口
-v3.3修正: R1系数进化(2026-06-18复盘，4场方向全错+强队总体胜率75%)
-  - R1 fav_discount 0.50→0.65 (过度惩罚强队，纯Elo能猜对3/4场)
-  - R1 underdog_boost 0.40→0.25 (弱队加成过激进)
-  - R1 draw_boost 0.15→0.08 (平局回归25%均值)
-  - 关键洞察：0.50系数把4场全对的Elo预测全变成错的
+v3.3修正: R1系数进化(2026-06-18复盘)
+v3.4新增: 市场共识预测 + R1→R2攻击动量修正(2026-06-23)
+  - predict_with_consensus(): 融合泊松概率与市场人气(participantCount)选比分/总进球
+  - set_r1_scoring(): 记录各队R1进球数，R2有攻击余势的球队xG+15%
+  - 比分选择: 当top2泊松比分差距<3%时，优先选市场共识更高的那个
+  - 总进球选择: 泊松P(k)与市场共识k存在分歧时，纳入共识权重
 v3.1新增: 实时数据集成(阵容/伤停/赔率)
 v3.2新增: 爆冷分析模块(三层判据) + 轮次自适应全面进化
 """
@@ -36,13 +34,19 @@ DEFENSE_EXTREME_THRESHOLD = 0.5
 class FootballPredictionEngine:
     """足球比赛预测引擎 v3.2+"""
     
+    # v3.4: R1→R2攻击动量 — 首轮进球3+的球队在R2获得xG加成
+    R1_SCORING_THRESHOLD = 3    # 首轮进球≥3球触发动量
+    R1_MOMENTUM_BOOST = 0.15    # 首轮3+进球→R2 xG +15%
+
     def __init__(self, data_dir: str = None):
         self.elo_ratings = {}
         self.team_stats = {}
         self.prediction_log = []
         # v4.0: 可被进化引擎注入的自定义轮次系数
         self._round_coefficients = None
-        
+        # v3.4: 首轮进球追踪用于R2攻击动量修正
+        self._r1_goals = {}  # {team_name: goals_scored}
+
         if data_dir:
             self.load_data(data_dir)
     
@@ -58,6 +62,17 @@ class FootballPredictionEngine:
         if os.path.exists(stats_path):
             with open(stats_path, 'r', encoding='utf-8') as f:
                 self.team_stats = json.load(f)
+
+    def set_r1_scoring(self, team_goals: Dict[str, int]):
+        """v3.4: 设置各队首轮进球数，用于R2攻击动量修正
+
+        用法：赛后记录各队R1进球 → 下轮预测时自动对3+进球的球队
+        在R2给xG + R1_MOMENTUM_BOOST(15%)加成
+        
+        Args:
+            team_goals: {team_name: goals_scored_in_r1, ...}
+        """
+        self._r1_goals = dict(team_goals)
     
     def set_round_coefficients(self, coefficients: Dict):
         """v4.0: 接受进化引擎注入的自定义轮次系数
@@ -142,6 +157,18 @@ class FootballPredictionEngine:
         
         xg_a = LEAGUE_AVG_GOALS * attack_a * defense_b
         xg_b = LEAGUE_AVG_GOALS * attack_b * defense_a
+
+        # v3.4: R1→R2攻击动量修正
+        # 如果首轮进球≥3，R2的攻击力会有惯性余势(挪威首轮4-1→R2攻击力被低估)
+        # 只在R2启用（R3已回归常态）
+        if tournament_round == 'group_stage_round2' and self._r1_goals:
+            r1_a = self._r1_goals.get(team_a, 0)
+            r1_b = self._r1_goals.get(team_b, 0)
+            if r1_a >= self.R1_SCORING_THRESHOLD:
+                xg_a *= (1 + self.R1_MOMENTUM_BOOST)
+            if r1_b >= self.R1_SCORING_THRESHOLD:
+                xg_b *= (1 + self.R1_MOMENTUM_BOOST)
+        
         return xg_a, xg_b
     
     def poisson_matrix(self, xg_a: float, xg_b: float, max_goals: int = 7) -> Dict:
@@ -387,6 +414,139 @@ class FootballPredictionEngine:
     # ============================================
     # v3.0 原始预测方法
     # ============================================
+
+    def predict_with_consensus(self, team_a: str, team_b: str,
+                                market_scores: Dict[str, int] = None,
+                                market_totals: Dict[str, int] = None,
+                                corrections: Dict = None,
+                                is_knockout: bool = False,
+                                tournament_round: str = None) -> Dict:
+        """v3.4: 融合泊松概率与市场共识的增强预测
+
+        解决的问题：纯泊松比分选择至今0%命中率。泊松最高概率比分
+        在世界杯中极少中奖。市场人气(participantCount)是有效的
+        交叉验证信号。
+
+        Args:
+            team_a, team_b: 球队名
+            market_scores: {score_option: participant_count, ...}
+                例: {"1:0": 0, "2:0": 21, "3:0": 8, ...}
+            market_totals: {total_option: participant_count, ...}
+                例: {"0": 0, "1": 0, "2": 19, "3": 11, ...}
+            corrections: 修正因子
+            is_knockout: 是否淘汰赛
+            tournament_round: 比赛轮次
+
+        Returns:
+            标准预测dict + consensus_scores和consensus_totals字段
+        """
+        # 步骤1: 基础预测
+        result = self.predict(team_a, team_b, corrections, is_knockout, tournament_round)
+
+        # 步骤2: 市场共识辅助选择最佳比分
+        top_scores = result['top_scores']
+        best_score = None
+        best_score_reason = ""
+
+        if market_scores:
+            # 将市场scores的key规范化（colon格式）
+            norm_market = {k.replace('-', ':'): v for k, v in market_scores.items()}
+            norm_market = {k: v for k, v in market_scores.items()}
+
+            # 从top_scores中找第一个存在于市场选项中的比分
+            candidate_scores = []
+            for score_str, prob in top_scores:
+                score_str_colon = score_str.replace('-', ':')
+                if score_str_colon in market_scores:
+                    candidate_scores.append((score_str_colon, prob, market_scores.get(score_str_colon, 0)))
+
+            if len(candidate_scores) >= 2:
+                # v3.4核心逻辑: 当top2比分概率差<3%时，优先选市场共识高的
+                s1, p1, c1 = candidate_scores[0]
+                s2, p2, c2 = candidate_scores[1] if len(candidate_scores) > 1 else (None, 0, 0)
+
+                if abs(p1 - p2) < 3.0 and c2 > c1:
+                    best_score = s2
+                    best_score_reason = (
+                        f"泊松top2接近({p1:.1f}%vs{p2:.1f}%)，"
+                        f"市场共识{s2}({c2}人)>{s1}({c1}人)，选{s2}"
+                    )
+                    result['score_selection_note'] = best_score_reason
+                    result['score_pick'] = best_score
+                    result['score_confidence'] = p2
+                else:
+                    best_score = s1
+                    result['score_pick'] = s1
+                    result['score_confidence'] = p1
+            elif len(candidate_scores) == 1:
+                best_score = candidate_scores[0][0]
+                result['score_pick'] = best_score
+                result['score_confidence'] = candidate_scores[0][1]
+            elif len(top_scores) > 0:
+                # 所有top scores都不在市场选项中 → 选市场共识最高的
+                if market_scores:
+                    best_by_market = max(market_scores.items(), key=lambda x: x[1])
+                    best_score = best_by_market[0]
+                    result['score_selection_note'] = (
+                        f"泊松top_scores均不在市场选项中，"
+                        f"跟随市场最高共识{best_score}({best_by_market[1]}人)"
+                    )
+                    result['score_pick'] = best_score
+                    result['score_confidence'] = 0
+        else:
+            # 无市场数据，退回到原始top_scores[0]
+            if top_scores:
+                best_score = top_scores[0][0].replace('-', ':')
+                result['score_pick'] = best_score
+                result['score_confidence'] = top_scores[0][1]
+
+        # 步骤3: 市场共识辅助选择总进球
+        if market_totals:
+            xg_total = result['xg_a'] + result['xg_b']
+            # 计算泊松各总进球概率
+            from math import exp, factorial
+            poisson_totals = {}
+            for k_str in market_totals:
+                if k_str == '7+':
+                    poisson_totals['7+'] = 1 - sum(
+                        (xg_total ** k) * exp(-xg_total) / factorial(k) for k in range(7)
+                    ) * 100
+                else:
+                    k = int(k_str)
+                    poisson_totals[k_str] = ((xg_total ** k) * exp(-xg_total) / factorial(k)) * 100
+
+            # 找泊松最高和市场最高
+            best_poisson = max(poisson_totals, key=poisson_totals.get)
+            best_market = max(market_totals, key=market_totals.get)
+
+            result['consensus_totals'] = {
+                'xg_total': round(xg_total, 2),
+                'poisson_top': (best_poisson, round(poisson_totals[best_poisson], 1)),
+                'market_top': (best_market, market_totals[best_market]),
+                'poisson_distribution': {k: round(v, 1) for k, v in poisson_totals.items()},
+                'market_distribution': market_totals
+            }
+
+            # v3.4: 如果市场共识与泊松top不同且市场人数明显更多，跟市场
+            if best_poisson != best_market:
+                market_count = market_totals.get(best_market, 0)
+                poisson_count = market_totals.get(best_poisson, 0)
+                if market_count > poisson_count * 3:
+                    result['total_pick'] = best_market
+                    result['total_confidence'] = min(25, poisson_totals.get(best_market, 0))
+                    result['total_selection_note'] = (
+                        f"市场共识{best_market}({market_count}人)>>"
+                        f"泊松top{best_poisson}({poisson_count}人,{poisson_totals[best_poisson]:.1f}%)，"
+                        f"跟随市场"
+                    )
+                else:
+                    result['total_pick'] = best_poisson
+                    result['total_confidence'] = poisson_totals[best_poisson]
+            else:
+                result['total_pick'] = best_poisson
+                result['total_confidence'] = poisson_totals[best_poisson]
+
+        return result
     
     def monte_carlo_path(self, team: str, stages: List[Dict], 
                          simulations: int = 100000) -> Dict:
