@@ -19,12 +19,20 @@ description: 国际足联世界杯（FIFA World Cup）足球预测计算器 — 
 | v3.2 | — | 爆冷分析模块（三层判据+Tier分级） | 风格克制+状态变量+赛制红利 |
 | **v4.0** | **2026-06-17** | **进化引擎轮次自适应+回测验证+过拟合防御** | 不能让单次复盘绑架全局参数 |
 | **v4.1** | **2026-06-22** | **meyo123 Loop Engine + worldcup2026 API** | 全自动流水线 + 开源实时比分接入 |
+| **v4.2** | **2026-06-23** | **市场共识融合 + R1→R2攻击动量** | 比分0%→融合市场人气；总进球泊松+共识交叉验证；首轮3+进球球队R2 xG+15% |
 
 ### 核心规律（v2.1 验证，v4.0 固化为可进化参数）
 
 > **强队表现按轮次变化巨大，不能用单一系数。**
-> R1保守(0.50x) → R2反弹(1.10x) → R3常态(1.00x) → KO防守(0.95x)
+> R1保守(0.65x) → R2反弹(1.10x+动量加成) → R3常态(1.00x) → KO防守(0.95x)
 > 模型必须按轮次自适应，否则会在R1高估、R2低估之间反复出错。
+
+### v4.2 关键进化（2026-06-23）
+
+> **纯泊松比分选择至今0%命中。市场人气(participantCount)是有效的交叉验证信号。**
+> 当top2泊松比分概率差<3%时，优先选市场共识更高的那个。
+> 总进球：泊松P(k)与市场共识k分歧>3倍时，跟随市场。
+> R1→R2攻击动量：首轮进3+球的球队，R2 xG自动+15%（挪威4-1→R2攻击力被低估）
 
 ## 核心能力
 
@@ -42,6 +50,8 @@ description: 国际足联世界杯（FIFA World Cup）足球预测计算器 — 
 | **v2.1轮次自适应** | 量化分析 | 4套轮次系数：R1保守(×0.5)→R2反弹(×1.10)→R3常态(×1.00)→KO防守(×0.95) |
 | **v3.1实时数据** | 量化分析 | BSD API集成：首发阵容+阵型+伤停报告+实时赔率多源对比 |
 | **v3.2爆冷进化** | 量化分析 | 三代爆冷分析：三层判据+match_context参数+Tier分级(1/2/3) |
+| **v4.2市场共识** | 量化分析 | 预测融合市场人气(participantCount)：比分top2接近时选共识高的；总进球分歧>3倍跟市场 |
+| **v4.2攻击动量** | 量化分析 | R1→R2动量修正：set_r1_scoring({})注入首轮进球数，3+进球球队R2 xG自动+15% |
 
 ### 🧬 进化能力（v4.0 全面升级）
 
@@ -167,10 +177,20 @@ description: 国际足联世界杯（FIFA World Cup）足球预测计算器 — 
 2. 判断比赛轮次（从 `data/world_cup_schedule.json` 读取，不能凭直觉判断）
 3. 联网搜索最新伤停、首发、赔率信息（可选）
 4. 加载引擎，调用 `engine.predict(team_a, team_b, tournament_round='group_stage_round1')` 
-5. 应用贝叶斯战术语境修正（控球陷阱+风格克制+联赛特性）
-6. 生成P0→P1概率更新和剧本预测
-7. 如需赔率分析，调用 `scripts/odds_fetcher.py`
-8. 输出完整预测报告，附风险提示
+5. **v4.2增强**: 对于有市场数据的场景，使用 `engine.predict_with_consensus()` 融合泊松与市场人气:
+   ```python
+   engine.set_r1_scoring({'挪威': 4, '英格兰': 4, ...})  # 先注入首轮进球
+   pred = engine.predict_with_consensus(
+       '挪威', '塞内加尔',
+       market_scores={"1:0": 0, "2:0": 25, ...},
+       market_totals={"0": 0, "1": 0, "2": 23, "3": 7, ...},
+       tournament_round='group_stage_round2'
+   )
+   ```
+6. 应用贝叶斯战术语境修正（控球陷阱+风格克制+联赛特性）
+7. 生成P0→P1概率更新和剧本预测
+8. 如需赔率分析，调用 `scripts/odds_fetcher.py`
+9. 输出完整预测报告，附风险提示
 
 ### 赛后复盘
 
@@ -206,6 +226,19 @@ python scripts/evolution_engine.py --evolve
 
 # 回测验证
 python scripts/evolution_engine.py --backtest
+
+# v4.2: 设置R1进球数据（赛后执行，供下轮动量修正）
+python -c "
+import json
+from scripts.prediction_engine import FootballPredictionEngine
+engine = FootballPredictionEngine(data_dir='data')
+# 从worldcup2026 API或复盘日志获取各队R1进球
+engine.set_r1_scoring({
+    '挪威': 4, '英格兰': 4, '阿根廷': 3,
+    '哥伦比亚': 3, '法国': 3, '奥地利': 3,
+    ...
+})
+"
 ```
 
 ## 输出格式模板
@@ -298,7 +331,7 @@ python scripts/evolution_engine.py --backtest
 📊 回测验证: 总偏差X | 方向准确率Y%
 ```
 
-## meyo123 绿茵钳王预测闭环流水线（v4.1）
+## meyo123 绿茵钳王预测闭环流水线（v4.2）
 
 本技能已集成到 meyo123 绿茵钳王 · 预测争霸赛的 Loop Engineering 流水线中：
 
@@ -314,10 +347,12 @@ python scripts/evolution_engine.py --backtest
 ├─ 第3步: 拉公告 (POST /heartbeat)
 ├─ 第4步: 拉明天全天赛事 (closeTime ∈ [明天00:00, 23:59])
 │         WebSearch 收集阵容/伤停/赔率/专家预测消息面
-├─ 第5步: prediction_engine.predict() 批量预测
+├─ 第5步: prediction_engine 批量预测 (v4.2 市场共识增强)
+│         ├─ set_r1_scoring({team: r1_goals}) 注入首轮进球数据
 │         ├─ win_lose_draw: max(final.win_a, final.draw, final.win_b)
-│         ├─ score: top_scores[0] (dash→colon格式转换)
-│         └─ total_goals: poisson极值 (xg_a+xg_b)
+│         ├─ score: predict_with_consensus() — 泊松top2<3%差→选共识高的
+│         │         market_scores从API response的options+participantCount构建
+│         └─ total_goals: predict_with_consensus() — 市场vs泊松分歧>3倍→跟市场
 │         POST /predict 自动提交到 meyo123
 └─ 第6步: 登记预测到 prediction_register.json (含消息面交叉验证)
     ↓
