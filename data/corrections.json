@@ -98,5 +98,37 @@
   "round1_hierarchical_rule": {
     "value": 1,
     "description": "v3.0新增发现：R1系数不应统一应用。强队表现与Elo差距高度相关：大差距(>300)=容易平局(保守开篇+对手严防)，中等差距(150-300)=实力完全可兑现，小差距(<150)=不确定。未来版本建议flip分层而非统一系数"
+  },
+  "ko_draw_probability_boost": {
+    "value": 0.1,
+    "description": "v4.3进化(6/30): R32淘汰赛3场2平。KO阶段平局概率被低估(方向准确率仅33%)。小步长+0.05从0.05→0.10。KO级防守优先于进攻，平局概率高于小组赛。"
+  },
+  "ko_favorite_discount": {
+    "value": 0.95,
+    "description": "v4.0→v4.3: 淘汰赛强队xG折扣系数0.95。淘汰赛防守强度提高，强队场均进球低于小组赛。R32验证：巴西2-1(仅赢1球)、德国1-1、荷兰1-1。"
+  },
+  "ko_underdog_boost": {
+    "value": 0.1,
+    "description": "v4.3: KO淘汰赛弱队加成+0.10。弱队在淘汰赛往往摆大巴+反击策略，进球能力虽低但整体竞争力不弱于小组赛。巴拉圭淘汰德国、摩洛哥淘汰荷兰验证。"
+  },
+  "host_nation_xg_boost": {
+    "value": 0.15,
+    "description": "v4.4进化(7/1): 2026世界杯联合东道主(墨西哥/加拿大/美国)KO赛xG+15%。依据: 墨西哥R32 2-0厄瓜多尔，模型xG 1.24 vs 实际2球，误差+0.76。东道主主场优势(观众/场地/气候)无法在历史xG中体现。"
+  },
+  "host_nation_opponent_penalty": {
+    "value": 0.10,
+    "description": "v4.4进化(7/1): 东道主对手KO赛xG-10%。客队在东道主主场面临观众压力+旅行疲劳+气候适应，攻击力打折。"
+  },
+  "superstar_xg_boost": {
+    "value": 0.10,
+    "description": "v4.4进化(7/1): 有超级巨星的球队KO赛xG+10%。依据: 法国R32 3-0瑞典，Mbappé双响，模型xG 1.69 vs 实际3球，误差+1.31。超级巨星名单: Mbappé(法)/Haaland(挪)/Bellingham(英)/Vinicius(巴)/Lautaro(阿)/Musiala(德)/Yamal(西)。"
+  },
+  "handicap_direction_warning": {
+    "value": 1,
+    "description": "v4.4进化(7/1): R32共6场让球方向0/6命中。让球盘定价与FT方向存在系统性偏差。当让球方向与FT方向冲突时标注'让球高风险'。建议让球盘投注降级处理。"
+  },
+  "strategy_priority_htft_totalgoals": {
+    "value": 1,
+    "description": "v4.4进化(7/1): HT/FT Top1命中率67%(4/6)、总进球Top2命中率67%(4/6)，优于FT方向(33%)和让球方向(0%)。预测输出中标注为主推策略。"
   }
 }
