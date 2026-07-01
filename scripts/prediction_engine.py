@@ -30,6 +30,27 @@ POISSON_WEIGHT = 0.70
 DEFENSE_REGRESSION = 0.30
 DEFENSE_EXTREME_THRESHOLD = 0.5
 
+# ============================================
+# v4.4 新增: 东道主效应 + 球星加成
+# ============================================
+# 2026世界杯联合东道主（墨西哥/加拿大/美国）主场优势
+HOST_NATIONS_2026 = {'墨西哥', '加拿大', '美国'}
+HOST_XG_BOOST = 0.15       # 东道主xG +15%
+HOST_OPPONENT_XG_PENALTY = 0.10  # 东道主对手xG -10%
+
+# 超级巨星名单（KO赛爆发力难以用历史xG捕捉）
+# 依据: 2026 R32复盘 — Mbappé双响(法国3-0瑞典, 模型xG低估1.31球)
+SUPERSTAR_ROSTER = {
+    'Mbappé': '法国',
+    'Haaland': '挪威',
+    'Bellingham': '英格兰',
+    'Vinicius': '巴西',
+    'Lautaro': '阿根廷',
+    'Musiala': '德国',
+    'Yamal': '西班牙',
+}
+SUPERSTAR_XG_BOOST = 0.10  # 有超级巨星的球队KO赛xG +10%
+
 
 class FootballPredictionEngine:
     """足球比赛预测引擎 v3.2+"""
@@ -37,6 +58,10 @@ class FootballPredictionEngine:
     # v3.4: R1→R2攻击动量 — 首轮进球3+的球队在R2获得xG加成
     R1_SCORING_THRESHOLD = 3    # 首轮进球≥3球触发动量
     R1_MOMENTUM_BOOST = 0.15    # 首轮3+进球→R2 xG +15%
+
+    # v4.4: 东道主效应 + 球星加成开关（默认开启，可关闭用于回测）
+    _host_effect_enabled = True
+    _superstar_effect_enabled = True
 
     def __init__(self, data_dir: str = None):
         self.elo_ratings = {}
@@ -46,6 +71,10 @@ class FootballPredictionEngine:
         self._round_coefficients = None
         # v3.4: 首轮进球追踪用于R2攻击动量修正
         self._r1_goals = {}  # {team_name: goals_scored}
+        # v4.4: 赛事东道主名单（默认2026世界杯联合东道主）
+        self._host_nations = set(HOST_NATIONS_2026)
+        # v4.4: 球星→球队映射（默认内置名单）
+        self._superstar_map = dict(SUPERSTAR_ROSTER)
 
         if data_dir:
             self.load_data(data_dir)
@@ -85,6 +114,26 @@ class FootballPredictionEngine:
             }
         """
         self._round_coefficients = coefficients
+
+    def set_host_nations(self, hosts: set):
+        """v4.4: 设置赛事东道主名单
+
+        Args:
+            hosts: {'墨西哥', '加拿大', '美国'} 或其他赛事的东道主集合
+        """
+        self._host_nations = set(hosts)
+
+    def set_superstar_map(self, star_to_team: Dict[str, str]):
+        """v4.4: 设置超级巨星→球队映射
+
+        Args:
+            star_to_team: {'Mbappé': '法国', 'Haaland': '挪威', ...}
+        """
+        self._superstar_map = dict(star_to_team)
+
+    def _team_has_superstar(self, team: str) -> bool:
+        """v4.4: 检查球队是否有超级巨星"""
+        return team in self._superstar_map.values()
     
     def elo_expected(self, elo_a: float, elo_b: float) -> float:
         return 1 / (1 + 10 ** ((elo_b - elo_a) / 400))
@@ -141,7 +190,7 @@ class FootballPredictionEngine:
                 'knockout_stage': {
                     'fav_discount': 0.95,    # 淘汰赛强队略打折(防守更严)
                     'underdog_boost': 0.10,  # 弱队稍加成
-                    'draw_boost': 0.05       # 淘汰赛更可能平
+                    'draw_boost': 0.10       # v4.3: 0.05→0.10, R32复盘3场2平验证
                 }
             }
             
@@ -168,7 +217,29 @@ class FootballPredictionEngine:
                 xg_a *= (1 + self.R1_MOMENTUM_BOOST)
             if r1_b >= self.R1_SCORING_THRESHOLD:
                 xg_b *= (1 + self.R1_MOMENTUM_BOOST)
-        
+
+        # v4.4: 东道主效应修正（KO赛生效）
+        # 依据: 2026 R32复盘 — 墨西哥2-0厄瓜多尔，模型xG 1.24 vs 实际2球，误差+0.76
+        # 东道主主场优势（观众/场地/气候）无法在历史xG中体现
+        if self._host_effect_enabled and is_knockout:
+            a_is_host = team_a in self._host_nations
+            b_is_host = team_b in self._host_nations
+            if a_is_host and not b_is_host:
+                xg_a *= (1 + HOST_XG_BOOST)
+                xg_b *= (1 - HOST_OPPONENT_XG_PENALTY)
+            elif b_is_host and not a_is_host:
+                xg_b *= (1 + HOST_XG_BOOST)
+                xg_a *= (1 - HOST_OPPONENT_XG_PENALTY)
+
+        # v4.4: 球星加成（KO赛生效）
+        # 依据: 2026 R32复盘 — 法国3-0瑞典，Mbappé双响，模型xG 1.69 vs 实际3球，误差+1.31
+        # 超级巨星在KO赛爆发力难以用历史平均xG捕捉
+        if self._superstar_effect_enabled and is_knockout:
+            if self._team_has_superstar(team_a):
+                xg_a *= (1 + SUPERSTAR_XG_BOOST)
+            if self._team_has_superstar(team_b):
+                xg_b *= (1 + SUPERSTAR_XG_BOOST)
+
         return xg_a, xg_b
     
     def poisson_matrix(self, xg_a: float, xg_b: float, max_goals: int = 7) -> Dict:
@@ -215,7 +286,7 @@ class FootballPredictionEngine:
             'group_stage_round1': 0.08,   # v3.3: 首轮平局+8%(从15%下调，6/18平局率25%)
             'group_stage_round2': -0.10,  # 第2轮平局-10%(打出血性)
             'group_stage_round3': -0.05,  # 第3轮稍降
-            'knockout_stage': 0.05        # 淘汰赛平局+5%
+            'knockout_stage': 0.10        # v4.3: 淘汰赛平局+10%(从5%上调，R32 3场2平验证)
         }
         if tournament_round in DRAW_BOOST_BY_ROUND:
             draw_boost = DRAW_BOOST_BY_ROUND[tournament_round]
@@ -238,7 +309,25 @@ class FootballPredictionEngine:
         adj_a /= total2; adj_draw /= total2; adj_b /= total2
         
         top_scores = sorted(poisson['score_probs'].items(), key=lambda x: x[1], reverse=True)[:5]
-        
+
+        # v4.4: 让球风险标记
+        # 依据: R32共6场让球方向0/6命中，让球盘定价与FT方向存在系统性偏差
+        # 当FT方向明确时，让球方向如果与FT方向冲突，标注"让球高风险"
+        ft_direction = 'a' if adj_a > adj_b else 'b' if adj_b > adj_a else 'draw'
+        handicap_warnings = []
+        if is_knockout:
+            handicap_warnings.append('让球盘历史命中率极低(R32 0/6)，建议谨慎')
+            if ft_direction != 'draw':
+                handicap_warnings.append(f'FT方向偏向{team_a if ft_direction=="a" else team_b}，让球反向投注属高风险')
+
+        # v4.4: 策略推荐标记
+        # 依据: HT/FT Top1命中率67%(4/6)，总进球Top2命中率67%(4/6)，优于FT方向(33%)
+        strategy_hints = []
+        if is_knockout:
+            strategy_hints.append('HT/FT Top1为主推策略(历史命中率67%)')
+            strategy_hints.append('总进球Top2为次推策略(历史命中率67%)')
+            strategy_hints.append('比分推荐仅供娱乐，历史命中率0%')
+
         return {
             'team_a': team_a, 'team_b': team_b,
             'elo_a': elo_a, 'elo_b': elo_b,
@@ -262,7 +351,14 @@ class FootballPredictionEngine:
             'top_scores': top_scores,
             'corrections': corrections,
             'is_knockout': is_knockout,
-            'tournament_round': tournament_round
+            'tournament_round': tournament_round,
+            # v4.4 新增字段
+            'v44_enhancements': {
+                'host_effect_applied': is_knockout and (team_a in self._host_nations or team_b in self._host_nations),
+                'superstar_effect_applied': is_knockout and (self._team_has_superstar(team_a) or self._team_has_superstar(team_b)),
+                'handicap_warnings': handicap_warnings,
+                'strategy_hints': strategy_hints,
+            }
         }
     
     # ============================================
