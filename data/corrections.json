@@ -130,5 +130,21 @@
   "strategy_priority_htft_totalgoals": {
     "value": 1,
     "description": "v4.4进化(7/1): HT/FT Top1命中率67%(4/6)、总进球Top2命中率67%(4/6)，优于FT方向(33%)和让球方向(0%)。预测输出中标注为主推策略。"
+  },
+  "superstar_roster_v45_expansion": {
+    "value": 1,
+    "description": "v4.5进化(7/2): 球星名单扩充+2人。Kane(英格兰WC13球+R32逆转英雄75'86')、De Bruyne(比利时核心中场+R32 AET绝杀助攻者)。当前名单9人: Mbappé/Haaland/Bellingham/Kane/Vinicius/Lautaro/Musiala/Yamal/De Bruyne。"
+  },
+  "ko_balanced_xg_boost": {
+    "value": 0.30,
+    "description": "v4.5进化(7/2): KO均势对决xG爆发修正。触发条件：Elo差<200 且 双方xG极接近(最大值/最小值<1.3倍)。依据: R32c比利时vs塞内加尔模型xG合计2.01→实际90分钟4球(2倍误差)。双方xG同比例+30%。此效应与东道主/球星效应独立(心理因素vs个人能力)，允许叠加——De Bruyne球星加成+均势xG爆发可同时触发。"
+  },
+  "ko_strategy_probability_priority": {
+    "value": 1,
+    "description": "v4.5进化(7/2): KO赛策略优先级重大调整。R32累计9场：FT概率方向6/9(66.7%) >> FT价值方向0/3(0%)。市场在KO赛的定价比模型EV分析更准确，模型不应在KO赛推荐下盘冷门方向。策略顺序改为：FT概率方向 > 总进球Top1 > HT/FT Top1 > 让球方向(不推荐) > 比分(不建议)。"
+  },
+  "ko_handicap_confidence_downgrade": {
+    "value": 1,
+    "description": "v4.5进化(7/2): R32累计让球方向1/9(11.1%)，让球[-1]胜置信度降级为'极低'。英格兰2-1→让球平(非让球胜)、比利时2-2→让球负(非让球平)，与R32a/b同类现象一致。策略建议：不让球[-1]胜作为串关稳胆，尤其是赔率<2.00的让球胜。"
   }
 }
