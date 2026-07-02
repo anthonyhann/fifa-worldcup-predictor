@@ -1,5 +1,5 @@
 """
-足球预测引擎 v3.4 — FIFA世界杯预测计算器
+足球预测引擎 v4.5 — FIFA世界杯预测计算器
 模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
               + 市场共识融合 + R1→R2攻击动量
 v1.1修正: 单场决赛极端防守系数均值回归30%
@@ -8,12 +8,12 @@ v2.1修正: 轮次自适应(2026-06-17复盘，4场3穿盘反向验证)
 v3.0新增: Elo动态更新 + 赛后校准 + 进化日志接口
 v3.3修正: R1系数进化(2026-06-18复盘)
 v3.4新增: 市场共识预测 + R1→R2攻击动量修正(2026-06-23)
-  - predict_with_consensus(): 融合泊松概率与市场人气(participantCount)选比分/总进球
-  - set_r1_scoring(): 记录各队R1进球数，R2有攻击余势的球队xG+15%
-  - 比分选择: 当top2泊松比分差距<3%时，优先选市场共识更高的那个
-  - 总进球选择: 泊松P(k)与市场共识k存在分歧时，纳入共识权重
-v3.1新增: 实时数据集成(阵容/伤停/赔率)
-v3.2新增: 爆冷分析模块(三层判据) + 轮次自适应全面进化
+v4.4新增: 东道主效应 + 球星加成 + 让球风险标记 + 策略优先级(2026-07-01)
+v4.5新增: 球星名单扩充 + KO均势xG爆发修正 + 概率优先策略 + 让球置信降级(2026-07-02)
+  - SUPERSTAR_ROSTER新增: Kane(英格兰WC历史射手王)、De Bruyne(比利时核心)
+  - KO均势对决(Elo差距<200, xG差<1.3倍)双方xG+30%: R32比利时xG 2.01→实际4球
+  - KO赛策略: 概率方向>价值方向(R32 EV方向0/3全部失败)
+  - 让球[-1]置信度降级: R32累计1/9(11.1%)→标记为"极低置信"
 """
 
 import math
@@ -40,16 +40,28 @@ HOST_OPPONENT_XG_PENALTY = 0.10  # 东道主对手xG -10%
 
 # 超级巨星名单（KO赛爆发力难以用历史xG捕捉）
 # 依据: 2026 R32复盘 — Mbappé双响(法国3-0瑞典, 模型xG低估1.31球)
+# v4.5扩充: Kane(英格兰WC13球+逆转英雄)、De Bruyne(比利时核心中场)
 SUPERSTAR_ROSTER = {
     'Mbappé': '法国',
     'Haaland': '挪威',
     'Bellingham': '英格兰',
+    'Kane': '英格兰',         # v4.5新增: WC历史射手王(13球), R32逆转英雄75'86'
     'Vinicius': '巴西',
     'Lautaro': '阿根廷',
     'Musiala': '德国',
     'Yamal': '西班牙',
+    'De Bruyne': '比利时',    # v4.5新增: 比利时核心, R32 AET绝杀助攻者
 }
 SUPERSTAR_XG_BOOST = 0.10  # 有超级巨星的球队KO赛xG +10%
+
+# ============================================
+# v4.5 新增: KO均势对决xG爆发修正
+# ============================================
+# 依据: R32c复盘 — 比利时vs塞内加尔模型xG合计2.01→实际90分钟4球(2倍误差)
+# 均势对决在KO赛中"背水一战"心态大幅推高进球数，泊松模型无法捕捉
+KO_BALANCED_XG_BOOST = 0.30       # 均势对决双方xG同比例+30%
+KO_BALANCED_ELO_THRESHOLD = 200   # Elo差距<200判定为均势
+KO_BALANCED_XG_RATIO = 1.30       # xG最大值/最小值<1.3判定为均势xG
 
 
 class FootballPredictionEngine:
@@ -240,6 +252,20 @@ class FootballPredictionEngine:
             if self._team_has_superstar(team_b):
                 xg_b *= (1 + SUPERSTAR_XG_BOOST)
 
+        # v4.5: KO均势对决xG爆发修正
+        # 依据: R32c复盘 — 比利时vs塞内加尔模型xG合计2.01→实际90分钟4球(2倍误差)
+        # 均势对决(Elo差<200, 双方xG接近<1.3倍)在KO赛"背水一战"心态下进球远超预期
+        # 此效应与东道主/球星效应独立(心理因素vs个人能力)，允许叠加
+        if is_knockout:
+            elo_a = self.elo_ratings.get(team_a, 1500)
+            elo_b = self.elo_ratings.get(team_b, 1500)
+            xg_max = max(xg_a, xg_b)
+            xg_min = min(xg_a, xg_b)
+            xg_ratio = xg_max / max(xg_min, 0.01)
+            if abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD and xg_ratio < KO_BALANCED_XG_RATIO:
+                xg_a *= (1 + KO_BALANCED_XG_BOOST)
+                xg_b *= (1 + KO_BALANCED_XG_BOOST)
+
         return xg_a, xg_b
     
     def poisson_matrix(self, xg_a: float, xg_b: float, max_goals: int = 7) -> Dict:
@@ -250,18 +276,12 @@ class FootballPredictionEngine:
             for gb in range(max_goals):
                 p = self.poisson_prob(xg_a, ga) * self.poisson_prob(xg_b, gb)
                 score_probs[f"{ga}-{gb}"] = round(p * 100, 2)
-                if ga > gb: win_a += p
-                elif ga == ga: draw += p if ga == gb else 0
-                else: win_b += p
-        
-        # 修复draw计算
-        win_a = draw = win_b = 0.0
-        for ga in range(max_goals):
-            for gb in range(max_goals):
-                p = self.poisson_prob(xg_a, ga) * self.poisson_prob(xg_b, gb)
-                if ga > gb: win_a += p
-                elif ga == gb: draw += p
-                else: win_b += p
+                if ga > gb:
+                    win_a += p
+                elif ga == gb:
+                    draw += p
+                else:
+                    win_b += p
         
         return {'win_a': win_a, 'draw': draw, 'win_b': win_b, 'score_probs': score_probs}
     
@@ -310,23 +330,26 @@ class FootballPredictionEngine:
         
         top_scores = sorted(poisson['score_probs'].items(), key=lambda x: x[1], reverse=True)[:5]
 
-        # v4.4: 让球风险标记
-        # 依据: R32共6场让球方向0/6命中，让球盘定价与FT方向存在系统性偏差
-        # 当FT方向明确时，让球方向如果与FT方向冲突，标注"让球高风险"
+        # v4.4/v4.5: 让球风险标记
+        # 依据: R32让球方向1/9(11.1%)命中，让球[-1]胜置信极低
+        # v4.5更新: 累计数据扩展至9场，置信度降级为"极低"
         ft_direction = 'a' if adj_a > adj_b else 'b' if adj_b > adj_a else 'draw'
         handicap_warnings = []
         if is_knockout:
-            handicap_warnings.append('让球盘历史命中率极低(R32 0/6)，建议谨慎')
+            handicap_warnings.append('让球盘命中率极低(R32累计1/9=11.1%)，建议谨慎')
             if ft_direction != 'draw':
                 handicap_warnings.append(f'FT方向偏向{team_a if ft_direction=="a" else team_b}，让球反向投注属高风险')
+            handicap_warnings.append('让球[-1]胜置信度极低，仅1/9命中，不建议作为串关稳胆')
 
-        # v4.4: 策略推荐标记
-        # 依据: HT/FT Top1命中率67%(4/6)，总进球Top2命中率67%(4/6)，优于FT方向(33%)
+        # v4.4/v4.5: 策略推荐标记
+        # 依据: R32 9场数据：FT概率方向6/9(67%) > 总进球Top1 6/9(67%) > HT/FT Top1 5/9(56%)
+        # v4.5重大调整: EV价值方向0/3全部失败→KO赛概率方向优先
         strategy_hints = []
         if is_knockout:
-            strategy_hints.append('HT/FT Top1为主推策略(历史命中率67%)')
-            strategy_hints.append('总进球Top2为次推策略(历史命中率67%)')
-            strategy_hints.append('比分推荐仅供娱乐，历史命中率0%')
+            strategy_hints.append('FT概率方向为主推(R32命中率67%)，价值方向0/3不推荐')
+            strategy_hints.append('总进球Top1为次推(R32命中率67%)')
+            strategy_hints.append('HT/FT Top1命中率56%，可作辅助参考')
+            strategy_hints.append('让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿')
 
         return {
             'team_a': team_a, 'team_b': team_b,
@@ -352,10 +375,11 @@ class FootballPredictionEngine:
             'corrections': corrections,
             'is_knockout': is_knockout,
             'tournament_round': tournament_round,
-            # v4.4 新增字段
-            'v44_enhancements': {
+            # v4.4/v4.5 增强字段
+            'enhancements': {
                 'host_effect_applied': is_knockout and (team_a in self._host_nations or team_b in self._host_nations),
                 'superstar_effect_applied': is_knockout and (self._team_has_superstar(team_a) or self._team_has_superstar(team_b)),
+                'balanced_xg_boost_applied': False,  # 在expected_goals中难以回传，暂留占位
                 'handicap_warnings': handicap_warnings,
                 'strategy_hints': strategy_hints,
             }
