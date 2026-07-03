@@ -1,0 +1,245 @@
+{
+  "matches": [
+    {
+      "home": "澳大利亚",
+      "away": "埃及",
+      "prediction": {
+        "team_a": "澳大利亚",
+        "team_b": "埃及",
+        "elo_a": 1700,
+        "elo_b": 1680,
+        "elo_expected_a": 0.529,
+        "xg_a": 0.89,
+        "xg_b": 1.25,
+        "poisson": {
+          "win_a": 26.3,
+          "draw": 29.0,
+          "win_b": 44.7
+        },
+        "combined": {
+          "win_a": 25.5,
+          "draw": 39.2,
+          "win_b": 35.3
+        },
+        "final": {
+          "win_a": 25.5,
+          "draw": 39.2,
+          "win_b": 35.3
+        },
+        "top_scores": [
+          [
+            "0-1",
+            14.75
+          ],
+          [
+            "1-1",
+            13.08
+          ],
+          [
+            "0-0",
+            11.78
+          ],
+          [
+            "1-0",
+            10.45
+          ],
+          [
+            "0-2",
+            9.23
+          ],
+          [
+            "1-2",
+            8.19
+          ]
+        ],
+        "corrections": {},
+        "is_knockout": true,
+        "tournament_round": "knockout_stage",
+        "enhancements": {
+          "host_effect_applied": false,
+          "superstar_effect_applied": false,
+          "balanced_xg_boost_applied": false,
+          "handicap_warnings": [
+            "让球盘命中率极低(12场累计1/9=11.1%)，建议远离",
+            "FT方向偏向埃及，让球反向投注属高风险"
+          ],
+          "strategy_hints": [
+            "FT概率方向为主推(12场累计83%)，EV价值方向0/3不推荐",
+            "总进球Top1为次推(12场累计67%)，Top2覆盖达92%",
+            "HT/FT Top1命中率58%(7/12)，可作辅助参考",
+            "比分建议Top6覆盖(12场累计50%+)，勿仅押Top2-3",
+            "让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿"
+          ]
+        }
+      },
+      "live": null,
+      "odds": {
+        "home": 3.2,
+        "draw": 2.76,
+        "away": 2.2,
+        "handicap": "+1"
+      }
+    },
+    {
+      "home": "阿根廷",
+      "away": "佛得角",
+      "prediction": {
+        "team_a": "阿根廷",
+        "team_b": "佛得角",
+        "elo_a": 2100,
+        "elo_b": 1540,
+        "elo_expected_a": 0.962,
+        "xg_a": 2.62,
+        "xg_b": 0.58,
+        "poisson": {
+          "win_a": 79.1,
+          "draw": 13.1,
+          "win_b": 6.1
+        },
+        "combined": {
+          "win_a": 73.7,
+          "draw": 25.3,
+          "win_b": 0.9
+        },
+        "final": {
+          "win_a": 73.7,
+          "draw": 25.3,
+          "win_b": 0.9
+        },
+        "top_scores": [
+          [
+            "2-0",
+            13.92
+          ],
+          [
+            "3-0",
+            12.17
+          ],
+          [
+            "1-0",
+            10.62
+          ],
+          [
+            "2-1",
+            8.14
+          ],
+          [
+            "4-0",
+            7.97
+          ],
+          [
+            "3-1",
+            7.11
+          ]
+        ],
+        "corrections": {},
+        "is_knockout": true,
+        "tournament_round": "knockout_stage",
+        "enhancements": {
+          "host_effect_applied": false,
+          "superstar_effect_applied": true,
+          "balanced_xg_boost_applied": false,
+          "handicap_warnings": [
+            "让球盘命中率极低(12场累计1/9=11.1%)，建议远离",
+            "FT方向偏向阿根廷，让球反向投注属高风险"
+          ],
+          "strategy_hints": [
+            "FT概率方向为主推(12场累计83%)，EV价值方向0/3不推荐",
+            "总进球Top1为次推(12场累计67%)，Top2覆盖达92%",
+            "HT/FT Top1命中率58%(7/12)，可作辅助参考",
+            "比分建议Top6覆盖(12场累计50%+)，勿仅押Top2-3",
+            "让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿"
+          ]
+        }
+      },
+      "live": null,
+      "odds": {
+        "home": 2.06,
+        "draw": 3.45,
+        "away": 2.82,
+        "handicap": "-2"
+      }
+    },
+    {
+      "home": "哥伦比亚",
+      "away": "加纳",
+      "prediction": {
+        "team_a": "哥伦比亚",
+        "team_b": "加纳",
+        "elo_a": 1826,
+        "elo_b": 1652,
+        "elo_expected_a": 0.731,
+        "xg_a": 1.5,
+        "xg_b": 1.19,
+        "poisson": {
+          "win_a": 44.1,
+          "draw": 25.5,
+          "win_b": 30.2
+        },
+        "combined": {
+          "win_a": 42.9,
+          "draw": 35.3,
+          "win_b": 21.7
+        },
+        "final": {
+          "win_a": 42.9,
+          "draw": 35.3,
+          "win_b": 21.7
+        },
+        "top_scores": [
+          [
+            "1-1",
+            12.11
+          ],
+          [
+            "1-0",
+            10.15
+          ],
+          [
+            "2-1",
+            9.08
+          ],
+          [
+            "0-1",
+            8.08
+          ],
+          [
+            "2-0",
+            7.6
+          ],
+          [
+            "1-2",
+            7.23
+          ]
+        ],
+        "corrections": {},
+        "is_knockout": true,
+        "tournament_round": "knockout_stage",
+        "enhancements": {
+          "host_effect_applied": false,
+          "superstar_effect_applied": false,
+          "balanced_xg_boost_applied": false,
+          "handicap_warnings": [
+            "让球盘命中率极低(12场累计1/9=11.1%)，建议远离",
+            "FT方向偏向哥伦比亚，让球反向投注属高风险"
+          ],
+          "strategy_hints": [
+            "FT概率方向为主推(12场累计83%)，EV价值方向0/3不推荐",
+            "总进球Top1为次推(12场累计67%)，Top2覆盖达92%",
+            "HT/FT Top1命中率58%(7/12)，可作辅助参考",
+            "比分建议Top6覆盖(12场累计50%+)，勿仅押Top2-3",
+            "让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿"
+          ]
+        }
+      },
+      "live": null,
+      "odds": {
+        "home": 1.26,
+        "draw": 4.5,
+        "away": 8.8,
+        "handicap": "0"
+      }
+    }
+  ],
+  "generated_at": "2026-07-03T18:05:57.381989"
+}
