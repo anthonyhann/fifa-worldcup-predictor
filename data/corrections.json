@@ -120,8 +120,8 @@
     "description": "v4.4进化(7/1): 东道主对手KO赛xG-10%。客队在东道主主场面临观众压力+旅行疲劳+气候适应，攻击力打折。"
   },
   "superstar_xg_boost": {
-    "value": 0.10,
-    "description": "v4.4进化(7/1): 有超级巨星的球队KO赛xG+10%。依据: 法国R32 3-0瑞典，Mbappé双响，模型xG 1.69 vs 实际3球，误差+1.31。超级巨星名单: Mbappé(法)/Haaland(挪)/Bellingham(英)/Vinicius(巴)/Lautaro(阿)/Musiala(德)/Yamal(西)。"
+    "value": 0.12,
+    "description": "v4.4→v4.6: 有超级巨星的球队KO赛xG+10%→+12%。依据: R16西班牙Yamal未亲自进球(Oyarzabal双响)但全队xG超预期，验证'体系效应'而非个人进球能力。9人名单: Mbappé(法)/Haaland(挪)/Bellingham+Kane(英)/Vinicius(巴)/Lautaro(阿)/Musiala(德)/Yamal(西)/De Bruyne(比)。"
   },
   "handicap_direction_warning": {
     "value": 1,
@@ -146,5 +146,17 @@
   "ko_handicap_confidence_downgrade": {
     "value": 1,
     "description": "v4.5进化(7/2): R32累计让球方向1/9(11.1%)，让球[-1]胜置信度降级为'极低'。英格兰2-1→让球平(非让球胜)、比利时2-2→让球负(非让球平)，与R32a/b同类现象一致。策略建议：不让球[-1]胜作为串关稳胆，尤其是赔率<2.00的让球胜。"
+  },
+  "ko_favorite_xg_boost": {
+    "value": 0.08,
+    "description": "v4.6进化(7/3): KO主导胜xG修正。触发条件：Elo差>150且xG比>1.5。强队碾压模式下(Elo+实力双重优势)模型系统性低估进球。西班牙3-0(xG 1.63→实际3球, +1.37误差)验证。强队xG+8%，弱队xG-5%。与KO均势爆发互斥(条件相反)。"
+  },
+  "score_coverage_top6": {
+    "value": 1,
+    "description": "v4.6进化(7/3): 比分覆盖从Top5扩展到Top6。R16瑞士2-0在Top5(8.1%)却被用户遗漏；西班牙3-0在v4.5 Top5外→v4.6主导胜修正后进入Top6。12场累计比分Top5命中率50%(6/12)，Top6可提升覆盖。"
+  },
+  "strategy_12match_cumulative": {
+    "value": 1,
+    "description": "v4.6(7/3): 12场(R32+R16)累计策略优先级 — FT概率方向10/12(83%) > 总进球Top2 11/12(92%) > 总进球Top1 8/12(67%) > HT/FT Top1 7/12(58%) > 比分Top6 8+/12(67%) > 让球[-1]W 1/9(11%)。成本控制: 单轮≤10u，比分覆盖每场≥4选项。"
   }
 }

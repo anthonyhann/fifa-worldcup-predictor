@@ -14,6 +14,11 @@ v4.5新增: 球星名单扩充 + KO均势xG爆发修正 + 概率优先策略 + �
   - KO均势对决(Elo差距<200, xG差<1.3倍)双方xG+30%: R32比利时xG 2.01→实际4球
   - KO赛策略: 概率方向>价值方向(R32 EV方向0/3全部失败)
   - 让球[-1]置信度降级: R32累计1/9(11.1%)→标记为"极低置信"
+v4.6新增: 12场总计归纳进化 (2026-07-03)
+  - 球星体系效应: SUPERSTAR_XG_BOOST 0.10→0.12(Yamal/Kane未亲自进球但全队输出提升)
+  - KO主导胜xG修正: Elo差>150且xG比>1.5时强队xG+8%(西班牙3-0xG 1.63低估)
+  - 比分Top6扩展: predict()返回Top6而非Top5(R16瑞士2-0在Top5却被遗漏)
+  - 12场累计数据: FT方向83%·总进球Top2 92%·让球[-1]胜11.1%
 """
 
 import math
@@ -52,7 +57,7 @@ SUPERSTAR_ROSTER = {
     'Yamal': '西班牙',
     'De Bruyne': '比利时',    # v4.5新增: 比利时核心, R32 AET绝杀助攻者
 }
-SUPERSTAR_XG_BOOST = 0.10  # 有超级巨星的球队KO赛xG +10%
+SUPERSTAR_XG_BOOST = 0.12  # 有超级巨星的球队KO赛xG +12% (v4.6: 0.10→0.12, 体系效应)
 
 # ============================================
 # v4.5 新增: KO均势对决xG爆发修正
@@ -62,6 +67,17 @@ SUPERSTAR_XG_BOOST = 0.10  # 有超级巨星的球队KO赛xG +10%
 KO_BALANCED_XG_BOOST = 0.30       # 均势对决双方xG同比例+30%
 KO_BALANCED_ELO_THRESHOLD = 200   # Elo差距<200判定为均势
 KO_BALANCED_XG_RATIO = 1.30       # xG最大值/最小值<1.3判定为均势xG
+
+# ============================================
+# v4.6 新增: KO主导胜xG修正
+# ============================================
+# 依据: R16复盘 — 西班牙3-0奥地利(xG 1.63→实际3球, +1.37误差)
+# KO赛强队碾压时(xG比大+Elo差大)模型系统性低估进球数
+# 与KO_BALANCED_XG_BOOST互斥（触发条件相反）
+KO_FAVORITE_XG_BOOST = 0.08       # 主导方额外xG +8%
+KO_FAVORITE_ELO_THRESHOLD = 150   # Elo差距>150判定为主导
+KO_FAVORITE_XG_RATIO = 1.50       # xG最大值/最小值>1.5判定为主导
+KO_FAVORITE_OPPONENT_PENALTY = 0.05  # 被主导方xG -5%（碾压模式下弱队更少机会）
 
 
 class FootballPredictionEngine:
@@ -266,6 +282,21 @@ class FootballPredictionEngine:
                 xg_a *= (1 + KO_BALANCED_XG_BOOST)
                 xg_b *= (1 + KO_BALANCED_XG_BOOST)
 
+        # v4.6: KO主导胜xG修正（与均势爆发互斥）
+        # 依据: R16复盘 — 西班牙3-0奥地利(xG 1.63→实际3球, +1.37误差)
+        # KO赛强队碾压模式时(Elo差>150且xG比>1.5)模型系统性低估进球
+        # 强队"碾压模式"：更多高价值机会、弱队防守崩盘、大量垃圾时间进球
+        if is_knockout:
+            xg_ratio_fav = max(xg_a, xg_b) / max(min(xg_a, xg_b), 0.01)
+            elo_gap = abs(elo_a - elo_b)
+            if elo_gap > KO_FAVORITE_ELO_THRESHOLD and xg_ratio_fav > KO_FAVORITE_XG_RATIO:
+                if xg_a > xg_b:
+                    xg_a *= (1 + KO_FAVORITE_XG_BOOST)
+                    xg_b *= (1 - KO_FAVORITE_OPPONENT_PENALTY)
+                else:
+                    xg_b *= (1 + KO_FAVORITE_XG_BOOST)
+                    xg_a *= (1 - KO_FAVORITE_OPPONENT_PENALTY)
+
         return xg_a, xg_b
     
     def poisson_matrix(self, xg_a: float, xg_b: float, max_goals: int = 7) -> Dict:
@@ -328,27 +359,27 @@ class FootballPredictionEngine:
         total2 = adj_a + adj_draw + adj_b
         adj_a /= total2; adj_draw /= total2; adj_b /= total2
         
-        top_scores = sorted(poisson['score_probs'].items(), key=lambda x: x[1], reverse=True)[:5]
+        top_scores = sorted(poisson['score_probs'].items(), key=lambda x: x[1], reverse=True)[:6]  # v4.6: 5→6
 
-        # v4.4/v4.5: 让球风险标记
-        # 依据: R32让球方向1/9(11.1%)命中，让球[-1]胜置信极低
-        # v4.5更新: 累计数据扩展至9场，置信度降级为"极低"
+        # v4.4/v4.5/v4.6: 让球风险标记
+        # 依据: 12场累计让球[-1]胜仅1/9(11.1%)，让球盘与真实赛果偏差极大
         ft_direction = 'a' if adj_a > adj_b else 'b' if adj_b > adj_a else 'draw'
         handicap_warnings = []
         if is_knockout:
-            handicap_warnings.append('让球盘命中率极低(R32累计1/9=11.1%)，建议谨慎')
+            handicap_warnings.append('让球盘命中率极低(12场累计1/9=11.1%)，建议远离')
             if ft_direction != 'draw':
                 handicap_warnings.append(f'FT方向偏向{team_a if ft_direction=="a" else team_b}，让球反向投注属高风险')
-            handicap_warnings.append('让球[-1]胜置信度极低，仅1/9命中，不建议作为串关稳胆')
 
-        # v4.4/v4.5: 策略推荐标记
-        # 依据: R32 9场数据：FT概率方向6/9(67%) > 总进球Top1 6/9(67%) > HT/FT Top1 5/9(56%)
-        # v4.5重大调整: EV价值方向0/3全部失败→KO赛概率方向优先
+        # v4.4/v4.5/v4.6: 策略推荐标记
+        # 依据: 12场累计数据(R32 9场+R16 3场)
+        #   FT概率方向 10/12(83%) > 总进球Top2 11/12(92%) > 总进球Top1 8/12(67%)
+        #   HT/FT Top1 7/12(58%) > 比分Top6 8+/12(67%) > 让球[-1]W 1/9(11%)
         strategy_hints = []
         if is_knockout:
-            strategy_hints.append('FT概率方向为主推(R32命中率67%)，价值方向0/3不推荐')
-            strategy_hints.append('总进球Top1为次推(R32命中率67%)')
-            strategy_hints.append('HT/FT Top1命中率56%，可作辅助参考')
+            strategy_hints.append('FT概率方向为主推(12场累计83%)，EV价值方向0/3不推荐')
+            strategy_hints.append('总进球Top1为次推(12场累计67%)，Top2覆盖达92%')
+            strategy_hints.append('HT/FT Top1命中率58%(7/12)，可作辅助参考')
+            strategy_hints.append('比分建议Top6覆盖(12场累计50%+)，勿仅押Top2-3')
             strategy_hints.append('让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿')
 
         return {
