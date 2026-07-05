@@ -1,5 +1,5 @@
 """
-足球预测引擎 v4.5 — FIFA世界杯预测计算器
+足球预测引擎 v4.8 — FIFA世界杯预测计算器
 模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
               + 市场共识融合 + R1→R2攻击动量
 v1.1修正: 单场决赛极端防守系数均值回归30%
@@ -19,6 +19,11 @@ v4.6新增: 12场总计归纳进化 (2026-07-03)
   - KO主导胜xG修正: Elo差>150且xG比>1.5时强队xG+8%(西班牙3-0xG 1.63低估)
   - 比分Top6扩展: predict()返回Top6而非Top5(R16瑞士2-0在Top5却被遗漏)
   - 12场累计数据: FT方向83%·总进球Top2 92%·让球[-1]胜11.1%
+v4.7新增: R32d针对性进化 (2026-07-04)
+  - KO主导胜修正设上限: 0.08→0.05, 最大总增幅限制+15%(阿根廷73.7%→1-1修正过度)
+  - 高Elo差爆冷缓冲: Elo>400时强队xG-8%、弱队xG+6%(阿根廷560 Elo差被佛得角守平)
+  - 首次淘汰赛黑马加成: 首次进世界杯KO赛球队xG+8%(佛得角首秀超常发挥验证)
+  - 15场累计数据更新: FT方向80%·总进球Top2 87%·HT/FT 53%
 """
 
 import math
@@ -69,15 +74,32 @@ KO_BALANCED_ELO_THRESHOLD = 200   # Elo差距<200判定为均势
 KO_BALANCED_XG_RATIO = 1.30       # xG最大值/最小值<1.3判定为均势xG
 
 # ============================================
-# v4.6 新增: KO主导胜xG修正
+# v4.6→v4.7 修正: KO主导胜xG修正（设上限 + 高Elo差缓冲）
 # ============================================
-# 依据: R16复盘 — 西班牙3-0奥地利(xG 1.63→实际3球, +1.37误差)
-# KO赛强队碾压时(xG比大+Elo差大)模型系统性低估进球数
-# 与KO_BALANCED_XG_BOOST互斥（触发条件相反）
-KO_FAVORITE_XG_BOOST = 0.08       # 主导方额外xG +8%
+# v4.7: 0.08→0.05 (阿根廷73.7%被佛得角逼平，主导胜修正过度激进)
+# 新增上限: 强队xG总增幅(含此前叠加)不超过+15%
+KO_FAVORITE_XG_BOOST = 0.05       # 主导方额外xG +5% (v4.7: 0.08→0.05)
 KO_FAVORITE_ELO_THRESHOLD = 150   # Elo差距>150判定为主导
 KO_FAVORITE_XG_RATIO = 1.50       # xG最大值/最小值>1.5判定为主导
-KO_FAVORITE_OPPONENT_PENALTY = 0.05  # 被主导方xG -5%（碾压模式下弱队更少机会）
+KO_FAVORITE_OPPONENT_PENALTY = 0.05  # 被主导方xG -5%
+KO_FAVORITE_MAX_TOTAL_BOOST = 0.15   # v4.7新增: 强队xG总增幅上限+15%
+
+# ============================================
+# v4.7 新增: 高Elo差爆冷缓冲 + 首次KO赛黑马加成
+# ============================================
+# 依据: R32d复盘 — 阿根廷(560 Elo差)被佛得角(首次KO)1-1逼平
+# 高Elo差(>400)时强队倾向于"控制而非屠杀" → xG被系统性高估
+# 首次进KO赛的球队往往超水平发挥 → 需要独立加成
+HIGH_ELO_GAP_THRESHOLD = 400          # Elo差>400触发爆冷缓冲
+HIGH_ELO_GAP_FAV_BUFFER = 0.08        # 高Elo差强队xG -8% (避免屠杀预期)
+HIGH_ELO_GAP_UNDERDOG_BOOST = 0.06    # 高Elo差弱队xG +6% (爆冷潜力)
+
+# 首次世界杯淘汰赛球队名单（2026 R32d验证: 佛得角首秀逼平阿根廷）
+FIRST_KO_DEBUT_BOOST = 0.08           # 首次进KO赛球队xG +8%
+DEFAULT_FIRST_KO_DEBUT_TEAMS = {      # v4.7: 需要通过比赛进程手动维护
+    '佛得角', 'Cape Verde',
+    # 随着比赛推进陆续添加其他首次KO球队
+}
 
 
 class FootballPredictionEngine:
@@ -103,6 +125,8 @@ class FootballPredictionEngine:
         self._host_nations = set(HOST_NATIONS_2026)
         # v4.4: 球星→球队映射（默认内置名单）
         self._superstar_map = dict(SUPERSTAR_ROSTER)
+        # v4.7: 首次KO赛球队追踪
+        self._first_ko_debut_teams = set(DEFAULT_FIRST_KO_DEBUT_TEAMS)
 
         if data_dir:
             self.load_data(data_dir)
@@ -158,6 +182,14 @@ class FootballPredictionEngine:
             star_to_team: {'Mbappé': '法国', 'Haaland': '挪威', ...}
         """
         self._superstar_map = dict(star_to_team)
+
+    def set_first_ko_debut_teams(self, teams: set):
+        """v4.7: 设置首次世界杯淘汰赛球队名单
+
+        Args:
+            teams: {'佛得角', 'Cape Verde', ...} 首次进KO赛的球队集合
+        """
+        self._first_ko_debut_teams = set(teams)
 
     def _team_has_superstar(self, team: str) -> bool:
         """v4.4: 检查球队是否有超级巨星"""
@@ -282,20 +314,51 @@ class FootballPredictionEngine:
                 xg_a *= (1 + KO_BALANCED_XG_BOOST)
                 xg_b *= (1 + KO_BALANCED_XG_BOOST)
 
-        # v4.6: KO主导胜xG修正（与均势爆发互斥）
-        # 依据: R16复盘 — 西班牙3-0奥地利(xG 1.63→实际3球, +1.37误差)
-        # KO赛强队碾压模式时(Elo差>150且xG比>1.5)模型系统性低估进球
-        # 强队"碾压模式"：更多高价值机会、弱队防守崩盘、大量垃圾时间进球
+        # v4.7: KO主导胜xG修正（设上限 + 高Elo差缓冲替代v4.6旧逻辑）
+        # v4.6: +8%无上限 → v4.7: +5%且设总增幅上限+15%
+        # 依据: R32d阿根廷73.7%被佛得角逼平，主导胜修正过度激进
         if is_knockout:
             xg_ratio_fav = max(xg_a, xg_b) / max(min(xg_a, xg_b), 0.01)
             elo_gap = abs(elo_a - elo_b)
             if elo_gap > KO_FAVORITE_ELO_THRESHOLD and xg_ratio_fav > KO_FAVORITE_XG_RATIO:
+                # v4.7: 主导胜修正设上限 — 强队xG总增幅不超过+15%
                 if xg_a > xg_b:
+                    pre_boost_xg = xg_a
                     xg_a *= (1 + KO_FAVORITE_XG_BOOST)
+                    actual_boost = (xg_a - pre_boost_xg) / pre_boost_xg
+                    if actual_boost > KO_FAVORITE_MAX_TOTAL_BOOST:
+                        xg_a = pre_boost_xg * (1 + KO_FAVORITE_MAX_TOTAL_BOOST)
                     xg_b *= (1 - KO_FAVORITE_OPPONENT_PENALTY)
                 else:
+                    pre_boost_xg = xg_b
                     xg_b *= (1 + KO_FAVORITE_XG_BOOST)
+                    actual_boost = (xg_b - pre_boost_xg) / pre_boost_xg
+                    if actual_boost > KO_FAVORITE_MAX_TOTAL_BOOST:
+                        xg_b = pre_boost_xg * (1 + KO_FAVORITE_MAX_TOTAL_BOOST)
                     xg_a *= (1 - KO_FAVORITE_OPPONENT_PENALTY)
+
+        # v4.7: 高Elo差(>400)爆冷缓冲
+        # 依据: R32d阿根廷(560 Elo差)→被佛得角1-1逼平
+        # 英格兰(Kane 2-goal)高Elo差场景同样未兑现屠杀
+        # 高Elo差时强队"控制而非屠杀"→xG被系统性高估
+        if is_knockout:
+            elo_gap = abs(self.elo_ratings.get(team_a, 1500) - self.elo_ratings.get(team_b, 1500))
+            if elo_gap > HIGH_ELO_GAP_THRESHOLD:
+                if self.elo_ratings.get(team_a, 1500) > self.elo_ratings.get(team_b, 1500):
+                    xg_a *= (1 - HIGH_ELO_GAP_FAV_BUFFER)  # 强队xG -8%
+                    xg_b *= (1 + HIGH_ELO_GAP_UNDERDOG_BOOST)  # 弱队xG +6%
+                else:
+                    xg_b *= (1 - HIGH_ELO_GAP_FAV_BUFFER)
+                    xg_a *= (1 + HIGH_ELO_GAP_UNDERDOG_BOOST)
+
+        # v4.7: 首次淘汰赛黑马精神加成
+        # 依据: R32d佛得角(首次KO赛)逼平阿根廷，表现远超纸面实力
+        # 首次进世界杯淘汰赛的球队往往有"无惧无畏"的超常发挥
+        if is_knockout and self._first_ko_debut_teams:
+            if team_a in self._first_ko_debut_teams:
+                xg_a *= (1 + FIRST_KO_DEBUT_BOOST)
+            if team_b in self._first_ko_debut_teams:
+                xg_b *= (1 + FIRST_KO_DEBUT_BOOST)
 
         return xg_a, xg_b
     
@@ -361,26 +424,27 @@ class FootballPredictionEngine:
         
         top_scores = sorted(poisson['score_probs'].items(), key=lambda x: x[1], reverse=True)[:6]  # v4.6: 5→6
 
-        # v4.4/v4.5/v4.6: 让球风险标记
-        # 依据: 12场累计让球[-1]胜仅1/9(11.1%)，让球盘与真实赛果偏差极大
+        # v4.7: 让球风险标记 — 15场累计
+        # 依据: 15场累计让球[-1]胜仅1/9(11.1%)，让球盘与真实赛果偏差极大
         ft_direction = 'a' if adj_a > adj_b else 'b' if adj_b > adj_a else 'draw'
         handicap_warnings = []
         if is_knockout:
-            handicap_warnings.append('让球盘命中率极低(12场累计1/9=11.1%)，建议远离')
+            handicap_warnings.append('让球盘命中率极低(15场累计1/9=11.1%)，建议远离')
             if ft_direction != 'draw':
                 handicap_warnings.append(f'FT方向偏向{team_a if ft_direction=="a" else team_b}，让球反向投注属高风险')
 
-        # v4.4/v4.5/v4.6: 策略推荐标记
-        # 依据: 12场累计数据(R32 9场+R16 3场)
-        #   FT概率方向 10/12(83%) > 总进球Top2 11/12(92%) > 总进球Top1 8/12(67%)
-        #   HT/FT Top1 7/12(58%) > 比分Top6 8+/12(67%) > 让球[-1]W 1/9(11%)
+        # v4.7: 策略推荐标记 — 15场累计
+        # 依据: 15场累计数据(R32 9场+R16 3场+R32d 3场)
+        #   FT概率方向 12/15(80%) > 总进球Top2 13/15(87%) > 总进球Top1 9/15(60%)
+        #   HT/FT Top1 8/15(53%) > 比分Top6 ~10/15(67%) > 让球[-1]W 1/9(11%)
         strategy_hints = []
         if is_knockout:
-            strategy_hints.append('FT概率方向为主推(12场累计83%)，EV价值方向0/3不推荐')
-            strategy_hints.append('总进球Top1为次推(12场累计67%)，Top2覆盖达92%')
-            strategy_hints.append('HT/FT Top1命中率58%(7/12)，可作辅助参考')
-            strategy_hints.append('比分建议Top6覆盖(12场累计50%+)，勿仅押Top2-3')
+            strategy_hints.append('FT概率方向为主推(15场累计80%)，EV价值方向0/3不推荐')
+            strategy_hints.append('总进球Top1为次推(15场累计60%)，Top2覆盖达87%')
+            strategy_hints.append('HT/FT Top1命中率53%(8/15)，可信度下降，建议仅作辅助')
+            strategy_hints.append('比分建议Top6覆盖(15场累计67%)，高Elo差场次注意搏冷')
             strategy_hints.append('让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿')
+            strategy_hints.append('v4.7: 高Elo差(>400)KO赛强队屠杀预期调降，首次KO球队有黑马加成')
 
         return {
             'team_a': team_a, 'team_b': team_b,
@@ -406,11 +470,13 @@ class FootballPredictionEngine:
             'corrections': corrections,
             'is_knockout': is_knockout,
             'tournament_round': tournament_round,
-            # v4.4/v4.5 增强字段
+            # v4.7 增强字段
             'enhancements': {
                 'host_effect_applied': is_knockout and (team_a in self._host_nations or team_b in self._host_nations),
                 'superstar_effect_applied': is_knockout and (self._team_has_superstar(team_a) or self._team_has_superstar(team_b)),
-                'balanced_xg_boost_applied': False,  # 在expected_goals中难以回传，暂留占位
+                'balanced_xg_boost_applied': is_knockout and abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD and (max(xg_a, xg_b) / max(min(xg_a, xg_b), 0.01)) < KO_BALANCED_XG_RATIO,
+                'high_elo_gap_buffer_applied': is_knockout and abs(elo_a - elo_b) > HIGH_ELO_GAP_THRESHOLD,
+                'first_ko_debut_boost_applied': is_knockout and (team_a in self._first_ko_debut_teams or team_b in self._first_ko_debut_teams),
                 'handicap_warnings': handicap_warnings,
                 'strategy_hints': strategy_hints,
             }

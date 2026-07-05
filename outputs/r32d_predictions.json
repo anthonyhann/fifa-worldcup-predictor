@@ -72,12 +72,25 @@
           ]
         }
       },
-      "live": null,
+      "live": {
+        "source": "cache",
+        "home_team": "Australia",
+        "away_team": "Egypt",
+        "home_score": "0",
+        "away_score": "0",
+        "finished": "FALSE",
+        "time_elapsed": "notstarted",
+        "local_date": "07/03/2026 13:00",
+        "matchday": "4",
+        "group": "R32",
+        "type": "r32",
+        "match_id": "88"
+      },
       "odds": {
         "home": 3.2,
         "draw": 2.76,
         "away": 2.2,
-        "handicap": "+1"
+        "handicap": "0"
       }
     },
     {
@@ -152,7 +165,20 @@
           ]
         }
       },
-      "live": null,
+      "live": {
+        "source": "cache",
+        "home_team": "Argentina",
+        "away_team": "Cape Verde",
+        "home_score": "0",
+        "away_score": "0",
+        "finished": "FALSE",
+        "time_elapsed": "notstarted",
+        "local_date": "07/03/2026 18:00",
+        "matchday": "4",
+        "group": "R32",
+        "type": "r32",
+        "match_id": "86"
+      },
       "odds": {
         "home": 2.06,
         "draw": 3.45,
@@ -232,7 +258,20 @@
           ]
         }
       },
-      "live": null,
+      "live": {
+        "source": "cache",
+        "home_team": "Colombia",
+        "away_team": "Ghana",
+        "home_score": "0",
+        "away_score": "0",
+        "finished": "FALSE",
+        "time_elapsed": "notstarted",
+        "local_date": "07/03/2026 20:30",
+        "matchday": "4",
+        "group": "R32",
+        "type": "r32",
+        "match_id": "87"
+      },
       "odds": {
         "home": 1.26,
         "draw": 4.5,
@@ -241,5 +280,6 @@
       }
     }
   ],
-  "generated_at": "2026-07-03T18:05:57.381989"
+  "api_status": " unavailable (HTTPError)",
+  "generated_at": "2026-07-03T18:24:37.532413"
 }
