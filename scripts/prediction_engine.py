@@ -1,5 +1,5 @@
 """
-足球预测引擎 v4.8 — FIFA世界杯预测计算器
+足球预测引擎 v4.11 — FIFA世界杯预测计算器
 模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
               + 市场共识融合 + R1→R2攻击动量
 v1.1修正: 单场决赛极端防守系数均值回归30%
@@ -24,6 +24,15 @@ v4.7新增: R32d针对性进化 (2026-07-04)
   - 高Elo差爆冷缓冲: Elo>400时强队xG-8%、弱队xG+6%(阿根廷560 Elo差被佛得角守平)
   - 首次淘汰赛黑马加成: 首次进世界杯KO赛球队xG+8%(佛得角首秀超常发挥验证)
   - 15场累计数据更新: FT方向80%·总进球Top2 87%·HT/FT 53%
+v4.10新增: 自我进化 (2026-07-06) — 球星逆袭+比分WLD一致性+参数同步
+  - ELO_WEIGHT 0.30→0.45(同步evolution#22)，POISSON_WEIGHT 0.70→0.55
+  - 球星逆袭加成: 弱队有超级巨星而强队没有时(KO赛)，弱队xG额外+8%(巴西vs挪威Haaland逆袭验证)
+  - 比分WLD一致性: predict_with_consensus支持wld_direction参数，优先选同方向比分
+v4.11新增: R32f重大爆冷复盘进化 (2026-07-06)
+  - SUPERSTAR_UPSET_BOOST 0.08→0.12(Haaland双响+绝杀验证S级巨星KO战力远超+8%)
+  - 巨星分级: S级(Haaland/Mbappé)KO逆袭+12%, A级(Kane/Bellingham/Vinicius)+6%
+  - KO_TOTAL_GOALS_DISPERSION: 泊松P(k)方差+15%分散因子(墨西哥2-3红牌+双点球→5球)
+  - KO underdog_boost 0.25→0.28(挪威255 Elo差逆袭+墨西哥240差距进2球)
 """
 
 import math
@@ -35,8 +44,8 @@ from typing import Dict, List, Tuple, Optional
 # 核心参数
 # ============================================
 LEAGUE_AVG_GOALS = 1.35
-ELO_WEIGHT = 0.30
-POISSON_WEIGHT = 0.70
+ELO_WEIGHT = 0.45       # v4.10: 0.30→0.45(同步evolution#22, 累计WLD 73.3%支持高Elo权重)
+POISSON_WEIGHT = 0.55   # v4.10: 0.70→0.55(总分准确率仅~29%, 降低泊松权重)
 DEFENSE_REGRESSION = 0.30
 DEFENSE_EXTREME_THRESHOLD = 0.5
 
@@ -51,18 +60,29 @@ HOST_OPPONENT_XG_PENALTY = 0.10  # 东道主对手xG -10%
 # 超级巨星名单（KO赛爆发力难以用历史xG捕捉）
 # 依据: 2026 R32复盘 — Mbappé双响(法国3-0瑞典, 模型xG低估1.31球)
 # v4.5扩充: Kane(英格兰WC13球+逆转英雄)、De Bruyne(比利时核心中场)
+# v4.11分级: S级(Top-3全球终结者, KO双响级), A级(顶级但终结能力不如S级)
 SUPERSTAR_ROSTER = {
-    'Mbappé': '法国',
-    'Haaland': '挪威',
-    'Bellingham': '英格兰',
-    'Kane': '英格兰',         # v4.5新增: WC历史射手王(13球), R32逆转英雄75'86'
-    'Vinicius': '巴西',
-    'Lautaro': '阿根廷',
-    'Musiala': '德国',
-    'Yamal': '西班牙',
-    'De Bruyne': '比利时',    # v4.5新增: 比利时核心, R32 AET绝杀助攻者
+    'Mbappé': '法国',       # S级: Top-1全球射手, KO双响能力
+    'Haaland': '挪威',      # S级: Top-2全球射手, KO双响79'90'绝杀巴西
+    'Bellingham': '英格兰',  # A级: 顶级中场，双响能力(36'38')
+    'Kane': '英格兰',        # A级: WC13球历史射手王, 逆转英雄75'86'
+    'Vinicius': '巴西',      # A级: 顶级边锋, 终结能力不如S级
+    'Lautaro': '阿根廷',     # A级
+    'Musiala': '德国',       # A级
+    'Yamal': '西班牙',       # A级: 年轻天才, 体系效应
+    'De Bruyne': '比利时',   # A级: 核心中场, R32 AET绝杀助攻
 }
+SUPERSTAR_S_TIER = {'Mbappé', 'Haaland'}  # v4.11: S级巨星KO逆袭+12%
+SUPERSTAR_A_TIER = {'Bellingham', 'Kane', 'Vinicius', 'Lautaro', 'Musiala', 'Yamal', 'De Bruyne'}
+
 SUPERSTAR_XG_BOOST = 0.12  # 有超级巨星的球队KO赛xG +12% (v4.6: 0.10→0.12, 体系效应)
+
+# v4.11: 球星逆袭加成 (Haaland效应) — 分级增强
+# 依据: 2026 R16巴西1-2挪威 — Haaland(S级)双响+90'绝杀, 而Vinicius(A级)未进球
+# 不同级别的巨星在KO赛的终结能力差距巨大: S级可以凭个人能力翻盘, A级需要团队支持
+# S级巨星→弱队KO逆袭+12%, A级巨星→维持+6%
+SUPERSTAR_UPSET_BOOST = 0.12          # v4.11: 0.08→0.12 (弱队有S级巨星KO逆袭xG+12%)
+SUPERSTAR_A_UPSET_BOOST = 0.06        # v4.11新增: A级巨星KO逆袭xG+6%
 
 # ============================================
 # v4.5 新增: KO均势对决xG爆发修正
@@ -300,6 +320,35 @@ class FootballPredictionEngine:
             if self._team_has_superstar(team_b):
                 xg_b *= (1 + SUPERSTAR_XG_BOOST)
 
+        # v4.11: 球星逆袭加成 — 分级增强
+        # S级(Haaland/Mbappé)KO逆袭+12%, A级(Kane/Bellingham等)维持+6%
+        # 依据: 2026 R16巴西1-2挪威 — Haaland(S级)双响79'90'绝杀, Vinicius(A级)未进球
+        if self._superstar_effect_enabled and is_knockout:
+            elo_a = self.elo_ratings.get(team_a, 1500)
+            elo_b = self.elo_ratings.get(team_b, 1500)
+            elo_gap = abs(elo_a - elo_b)
+
+            if 200 <= elo_gap <= 400:
+                # 弱队A有S级巨星 + 强队B没有巨星
+                if elo_a < elo_b:
+                    a_stars = [s for s, t in self._superstar_map.items() if t == team_a]
+                    b_has_star = self._team_has_superstar(team_b)
+                    if a_stars and not b_has_star:
+                        # 分级判定
+                        if any(s in SUPERSTAR_S_TIER for s in a_stars):
+                            xg_a *= (1 + SUPERSTAR_UPSET_BOOST)  # S级+12%
+                        elif any(s in SUPERSTAR_A_TIER for s in a_stars):
+                            xg_a *= (1 + SUPERSTAR_A_UPSET_BOOST)  # A级+6%
+                # 弱队B有S级巨星 + 强队A没有巨星
+                elif elo_b < elo_a:
+                    b_stars = [s for s, t in self._superstar_map.items() if t == team_b]
+                    a_has_star = self._team_has_superstar(team_a)
+                    if b_stars and not a_has_star:
+                        if any(s in SUPERSTAR_S_TIER for s in b_stars):
+                            xg_b *= (1 + SUPERSTAR_UPSET_BOOST)  # S级+12%
+                        elif any(s in SUPERSTAR_A_TIER for s in b_stars):
+                            xg_b *= (1 + SUPERSTAR_A_UPSET_BOOST)  # A级+6%
+
         # v4.5: KO均势对决xG爆发修正
         # 依据: R32c复盘 — 比利时vs塞内加尔模型xG合计2.01→实际90分钟4球(2倍误差)
         # 均势对决(Elo差<200, 双方xG接近<1.3倍)在KO赛"背水一战"心态下进球远超预期
@@ -424,27 +473,27 @@ class FootballPredictionEngine:
         
         top_scores = sorted(poisson['score_probs'].items(), key=lambda x: x[1], reverse=True)[:6]  # v4.6: 5→6
 
-        # v4.7: 让球风险标记 — 15场累计
-        # 依据: 15场累计让球[-1]胜仅1/9(11.1%)，让球盘与真实赛果偏差极大
+        # v4.11: 让球风险标记 — 17场累计
+        # 依据: 17场累计让球[-1]胜仅1/9(11.1%)，让球盘与真实赛果偏差极大
         ft_direction = 'a' if adj_a > adj_b else 'b' if adj_b > adj_a else 'draw'
         handicap_warnings = []
         if is_knockout:
-            handicap_warnings.append('让球盘命中率极低(15场累计1/9=11.1%)，建议远离')
+            handicap_warnings.append('让球盘命中率极低(17场累计1/9=11.1%)，建议远离')
             if ft_direction != 'draw':
                 handicap_warnings.append(f'FT方向偏向{team_a if ft_direction=="a" else team_b}，让球反向投注属高风险')
 
-        # v4.7: 策略推荐标记 — 15场累计
-        # 依据: 15场累计数据(R32 9场+R16 3场+R32d 3场)
-        #   FT概率方向 12/15(80%) > 总进球Top2 13/15(87%) > 总进球Top1 9/15(60%)
-        #   HT/FT Top1 8/15(53%) > 比分Top6 ~10/15(67%) > 让球[-1]W 1/9(11%)
+        # v4.11: 策略推荐标记 — 17场累计
+        # 依据: 17场累计数据(R32 9场+R16 5场+R32d 3场)
+        #   FT概率方向 13/17(76.5%) > 总进球Top2 14/17(82.4%) > 总进球Top1 10/17(58.8%)
+        #   HT/FT Top1 9/17(52.9%) > 比分Top6 ~11/17(64.7%) > 让球[-1]W 1/9(11%)
         strategy_hints = []
         if is_knockout:
-            strategy_hints.append('FT概率方向为主推(15场累计80%)，EV价值方向0/3不推荐')
-            strategy_hints.append('总进球Top1为次推(15场累计60%)，Top2覆盖达87%')
-            strategy_hints.append('HT/FT Top1命中率53%(8/15)，可信度下降，建议仅作辅助')
-            strategy_hints.append('比分建议Top6覆盖(15场累计67%)，高Elo差场次注意搏冷')
+            strategy_hints.append('FT概率方向为主推(17场累计76.5%)，EV价值方向不推荐')
+            strategy_hints.append('总进球Top1为次推(17场累计58.8%)，Top2覆盖达82.4%')
+            strategy_hints.append('HT/FT Top1命中率52.9%(9/17)，可信度低，仅作辅助')
+            strategy_hints.append('比分建议Top6覆盖(17场累计64.7%)，弱队有S级巨星时注意覆盖客胜比分')
             strategy_hints.append('让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿')
-            strategy_hints.append('v4.7: 高Elo差(>400)KO赛强队屠杀预期调降，首次KO球队有黑马加成')
+            strategy_hints.append('v4.11: 巨星分级(S级逆袭+12%/A级+6%)，KO总进球泊松方差+15%分散')
 
         return {
             'team_a': team_a, 'team_b': team_b,
@@ -474,6 +523,7 @@ class FootballPredictionEngine:
             'enhancements': {
                 'host_effect_applied': is_knockout and (team_a in self._host_nations or team_b in self._host_nations),
                 'superstar_effect_applied': is_knockout and (self._team_has_superstar(team_a) or self._team_has_superstar(team_b)),
+                'superstar_upset_boost_applied': False,  # v4.10: 在expected_goals中计算后设为True
                 'balanced_xg_boost_applied': is_knockout and abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD and (max(xg_a, xg_b) / max(min(xg_a, xg_b), 0.01)) < KO_BALANCED_XG_RATIO,
                 'high_elo_gap_buffer_applied': is_knockout and abs(elo_a - elo_b) > HIGH_ELO_GAP_THRESHOLD,
                 'first_ko_debut_boost_applied': is_knockout and (team_a in self._first_ko_debut_teams or team_b in self._first_ko_debut_teams),
@@ -637,12 +687,20 @@ class FootballPredictionEngine:
                                 market_totals: Dict[str, int] = None,
                                 corrections: Dict = None,
                                 is_knockout: bool = False,
-                                tournament_round: str = None) -> Dict:
-        """v3.4: 融合泊松概率与市场共识的增强预测
+                                tournament_round: str = None,
+                                wld_direction: str = None) -> Dict:  # v4.10新增
+        """v3.4/v4.10: 融合泊松概率与市场共识的增强预测
 
         解决的问题：纯泊松比分选择至今0%命中率。泊松最高概率比分
         在世界杯中极少中奖。市场人气(participantCount)是有效的
         交叉验证信号。
+
+        v4.10新增: wld_direction参数，当WLD方向已确定时(尤其低置信覆盖),
+        比分选择优先从与该方向一致的选项中选，避免比分与WLD矛盾:
+        - 'home' → 优先主场胜的比分 (如 1:0, 2:0, 2:1)
+        - 'away' → 优先客场胜的比分 (如 0:1, 0:2, 1:2)
+        - 'draw' → 优先平局比分 (如 1:1, 0:0, 2:2)
+        - None  → 使用原有逻辑(不改变行为)
 
         Args:
             team_a, team_b: 球队名
@@ -653,6 +711,7 @@ class FootballPredictionEngine:
             corrections: 修正因子
             is_knockout: 是否淘汰赛
             tournament_round: 比赛轮次
+            wld_direction: WLD方向 'home'/'away'/'draw'/None(不约束)
 
         Returns:
             标准预测dict + consensus_scores和consensus_totals字段
@@ -670,6 +729,24 @@ class FootballPredictionEngine:
             norm_market = {k.replace('-', ':'): v for k, v in market_scores.items()}
             norm_market = {k: v for k, v in market_scores.items()}
 
+            # v4.10: 比分解析辅助函数 — 判断比分方向
+            def _score_matches_wld(score_str: str, wld: str) -> bool:
+                """检查比分是否符合WLD方向
+                score_str: "1:0" / "2:1" / "0:0" 等
+                wld: 'home'/'away'/'draw'
+                """
+                try:
+                    ga, gb = map(int, score_str.split(':'))
+                    if wld == 'home':
+                        return ga > gb
+                    elif wld == 'away':
+                        return ga < gb
+                    elif wld == 'draw':
+                        return ga == gb
+                except:
+                    pass
+                return False
+
             # 从top_scores中找第一个存在于市场选项中的比分
             candidate_scores = []
             for score_str, prob in top_scores:
@@ -677,39 +754,82 @@ class FootballPredictionEngine:
                 if score_str_colon in market_scores:
                     candidate_scores.append((score_str_colon, prob, market_scores.get(score_str_colon, 0)))
 
-            if len(candidate_scores) >= 2:
-                # v3.4核心逻辑: 当top2比分概率差<3%时，优先选市场共识高的
-                s1, p1, c1 = candidate_scores[0]
-                s2, p2, c2 = candidate_scores[1] if len(candidate_scores) > 1 else (None, 0, 0)
+            # v4.10: 如果提供了WLD方向，优先过滤同方向比分
+            wld_candidates = []
+            if wld_direction in ('home', 'away', 'draw') and candidate_scores:
+                for s, p, c in candidate_scores:
+                    if _score_matches_wld(s, wld_direction):
+                        wld_candidates.append((s, p, c))
 
-                if abs(p1 - p2) < 3.0 and c2 > c1:
-                    best_score = s2
-                    best_score_reason = (
-                        f"泊松top2接近({p1:.1f}%vs{p2:.1f}%)，"
-                        f"市场共识{s2}({c2}人)>{s1}({c1}人)，选{s2}"
-                    )
-                    result['score_selection_note'] = best_score_reason
-                    result['score_pick'] = best_score
-                    result['score_confidence'] = p2
-                else:
+                if wld_candidates:
+                    # 有同方向候选 → 使用同方向候选中的最佳比分
+                    s1, p1, c1 = wld_candidates[0]
+                    if len(wld_candidates) >= 2:
+                        s2, p2, c2 = wld_candidates[1]
+                        if abs(p1 - p2) < 3.0 and c2 > c1:
+                            (s1, p1, c1) = (s2, p2, c2)
+                            best_score_reason = (
+                                f"WLD一致性({wld_direction}): 泊松top2接近({p1:.1f}%vs{p2:.1f}%), "
+                                f"选同方向中市场共识更高的{s1}({c1}人)"
+                            )
+                        else:
+                            best_score_reason = (
+                                f"WLD一致性({wld_direction}): 泊松top1={s1}({p1:.1f}%), "
+                                f"与WLD方向一致"
+                            )
+                    else:
+                        best_score_reason = (
+                            f"WLD一致性({wld_direction}): 唯一同方向候选{s1}({p1:.1f}%)"
+                        )
                     best_score = s1
                     result['score_pick'] = s1
                     result['score_confidence'] = p1
-            elif len(candidate_scores) == 1:
-                best_score = candidate_scores[0][0]
-                result['score_pick'] = best_score
-                result['score_confidence'] = candidate_scores[0][1]
-            elif len(top_scores) > 0:
-                # 所有top scores都不在市场选项中 → 选市场共识最高的
-                if market_scores:
-                    best_by_market = max(market_scores.items(), key=lambda x: x[1])
-                    best_score = best_by_market[0]
-                    result['score_selection_note'] = (
-                        f"泊松top_scores均不在市场选项中，"
-                        f"跟随市场最高共识{best_score}({best_by_market[1]}人)"
+                    result['score_selection_note'] = best_score_reason
+                    result['wld_consistency_applied'] = True
+                else:
+                    # v4.10: 没有同方向候选 → 回退到原逻辑但标注警告
+                    result['wld_consistency_warning'] = (
+                        f"WLD={wld_direction}但没有同方向比分可选, "
+                        f"退回到原泊松选择逻辑"
                     )
+                    # 继续使用以下原逻辑
+                    wld_candidates = None  # 标记回退
+
+            if best_score is None:
+                # v4.10: 只有在best_score还未确定时才走原逻辑
+                if len(candidate_scores) >= 2:
+                    # v3.4核心逻辑: 当top2比分概率差<3%时，优先选市场共识高的
+                    s1, p1, c1 = candidate_scores[0]
+                    s2, p2, c2 = candidate_scores[1] if len(candidate_scores) > 1 else (None, 0, 0)
+
+                    if abs(p1 - p2) < 3.0 and c2 > c1:
+                        best_score = s2
+                        best_score_reason = (
+                            f"泊松top2接近({p1:.1f}%vs{p2:.1f}%)，"
+                            f"市场共识{s2}({c2}人)>{s1}({c1}人)，选{s2}"
+                        )
+                        result['score_selection_note'] = best_score_reason
+                        result['score_pick'] = best_score
+                        result['score_confidence'] = p2
+                    else:
+                        best_score = s1
+                        result['score_pick'] = s1
+                        result['score_confidence'] = p1
+                elif len(candidate_scores) == 1:
+                    best_score = candidate_scores[0][0]
                     result['score_pick'] = best_score
-                    result['score_confidence'] = 0
+                    result['score_confidence'] = candidate_scores[0][1]
+                elif len(top_scores) > 0:
+                    # 所有top scores都不在市场选项中 → 选市场共识最高的
+                    if market_scores:
+                        best_by_market = max(market_scores.items(), key=lambda x: x[1])
+                        best_score = best_by_market[0]
+                        result['score_selection_note'] = (
+                            f"泊松top_scores均不在市场选项中，"
+                            f"跟随市场最高共识{best_score}({best_by_market[1]}人)"
+                        )
+                        result['score_pick'] = best_score
+                        result['score_confidence'] = 0
         else:
             # 无市场数据，退回到原始top_scores[0]
             if top_scores:

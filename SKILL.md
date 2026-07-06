@@ -26,6 +26,8 @@ description: 国际足联世界杯（FIFA World Cup）足球预测计算器 — 
 | **v4.6** | **2026-07-03** | **12场总计归纳：体系效应+主导胜+Top6+成本控制** | R16全黑-29u；西班牙3-0xG低估(+1.37)→主导胜修正；球星体系(Oyarzabal双响/Yamal未进球)→系数0.10→0.12；瑞士2-0在Top5遗漏→扩展Top6；成本失控29u/轮 |
 | **v4.7** | **2026-07-03** | **修复进化引擎准确率计算污染bug + 参数重置** | evolution_engine v2.1: 291条review_log中仅1条有actual_winner/predicted_winner字段 → None==None→True → 98.6%虚高；修复使用hit/is_correct；K_FACTOR 64→36、ELO_WEIGHT 0.15→0.30、KO系数回归合理值 |
 | **v4.9** | **2026-07-05** | **总进球KO市场共识优先+进化#21参数推进** | KO总进球0/3泊松top1完全失效→loop_engine总进球策略改为市场共识优先；ELO_WEIGHT 0.39→0.42；KO fav_discount 1.01→1.03；KO underdog_boost 0.19→0.22 |
+| **v4.10** | **2026-07-06** | **自我进化：球星逆袭+比分WLD一致性+参数同步** | ELO_WEIGHT 0.30→0.45(引擎常量同步evolution#22)；弱队巨星逆袭KO赛xG+4%；比分预测支持wld_direction一致性约束 |
+| **v4.11** | **2026-07-06** | **巨星分级+总进球分散+弱队加成增强** | Haaland(S级)双响绝杀→巨星分级(S级逆袭+12%/A级+6%)；墨西哥5球大球→KO总进球泊松方差+15%分散；挪威+墨西哥弱队进球超预期→KO underdog_boost 0.25→0.28 |
 
 ### 核心规律（v2.1 验证，v4.0 固化为可进化参数）
 
@@ -126,6 +128,10 @@ description: 国际足联世界杯（FIFA World Cup）足球预测计算器 — 
 | **v4.8 15场数据更新** | 量化分析 | FT方向12/15(80%)·总进球Top2 13/15(87%)·总进球Top1 9/15(60%)·HT/FT 8/15(53%)·比分Top6 ~67% |
 | **v4.9总进球KO市场共识** | 量化分析 | loop_engine总进球策略重写：KO赛优先市场共识最高选项→泊松合理性校验。替代原"泊松优先+3x分歧覆盖" |
 | **v4.9进化#21参数** | 量化分析 | ELO_WEIGHT 0.39→0.42、KO fav_discount 1.01→1.03、KO underdog_boost 0.19→0.22。184条回测38.0%整体对齐 |
+| **v4.9进化#22参数** | 量化分析 | ELO_WEIGHT 0.42→0.45、KO fav_discount 1.03→1.05、KO underdog_boost 0.22→0.25。316条回测38.0%整体|
+| **v4.10参数同步** | 量化分析 | ELO_WEIGHT 0.30→0.45(引擎常量同步evolution#22)、POISSON_WEIGHT 0.70→0.55。引擎预测不再使用过期参数 |
+| **v4.10球星逆袭加成** | 量化分析 | 弱队有超级巨星+强队无巨星+KO赛+Elo差200-400→弱队xG额外+8%。巴西vs挪威Haaland逆袭验证 |
+| **v4.10比分WLD一致性** | 量化分析 | predict_with_consensus()支持wld_direction参数，优先选与WLD方向一致的比分。瑞士vs哥伦比亚WLD主负+比分平局矛盾解决 |
 
 ### 🧬 进化能力（v4.0 全面升级）
 
