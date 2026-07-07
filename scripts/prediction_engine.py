@@ -1,5 +1,5 @@
 """
-足球预测引擎 v4.11 — FIFA世界杯预测计算器
+足球预测引擎 v4.12 — FIFA世界杯预测计算器
 模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
               + 市场共识融合 + R1→R2攻击动量
 v1.1修正: 单场决赛极端防守系数均值回归30%
@@ -33,6 +33,12 @@ v4.11新增: R32f重大爆冷复盘进化 (2026-07-06)
   - 巨星分级: S级(Haaland/Mbappé)KO逆袭+12%, A级(Kane/Bellingham/Vinicius)+6%
   - KO_TOTAL_GOALS_DISPERSION: 泊松P(k)方差+15%分散因子(墨西哥2-3红牌+双点球→5球)
   - KO underdog_boost 0.25→0.28(挪威255 Elo差逆袭+墨西哥240差距进2球)
+v4.12新增: R16均势双场复盘进化 (2026-07-07)
+  - KO东道主压力效应: R16+东道主vs强队(Elo差<150)时, +15%→-5%(美国1-4比利时验证)
+  - KO防守型均势识别: 双方avg_conceded<1.0+Elo差<200 → xG-15%(葡0-1西防守战验证)
+  - KO_BALANCED_XG_BOOST 0.30→0.20(19场累计均值偏差修正, 降低过度推高)
+  - 比分尾部拓宽: poisson_matrix max_goals默认7→KO赛8(美国1-4不在Top6验证)
+  - 19场累计: FT方向78.9%·比分Top6 63.2%·总进球Top2 73.7%·HT/FT 52.6%·让球1/11=9.1%
 """
 
 import math
@@ -89,9 +95,24 @@ SUPERSTAR_A_UPSET_BOOST = 0.06        # v4.11新增: A级巨星KO逆袭xG+6%
 # ============================================
 # 依据: R32c复盘 — 比利时vs塞内加尔模型xG合计2.01→实际90分钟4球(2倍误差)
 # 均势对决在KO赛中"背水一战"心态大幅推高进球数，泊松模型无法捕捉
-KO_BALANCED_XG_BOOST = 0.30       # 均势对决双方xG同比例+30%
+KO_BALANCED_XG_BOOST = 0.20       # v4.12: 0.30→0.20 (19场累计均值修正, 葡西高估2.13+美比低估1.45)
 KO_BALANCED_ELO_THRESHOLD = 200   # Elo差距<200判定为均势
 KO_BALANCED_XG_RATIO = 1.30       # xG最大值/最小值<1.3判定为均势xG
+
+# ============================================
+# v4.12 新增: KO东道主压力效应 + 防守型均势识别
+# ============================================
+# 依据: R16美国1-4比利时 — 美国获+15%xG boost但实际xG仅0.63(vs比利时2.01)
+# 东道主在R16+面对强队(Elo差<150)时, 主场压力>主场优势
+# R32东道主vs弱队(墨西哥2-0厄瓜多尔, 美国2-0波黑)时+15%仍然正确
+KO_HOST_PRESSURE_ELO_GAP = 150    # 东道主Elo低于对手<150时触发压力效应
+KO_HOST_PRESSURE_XG_PENALTY = 0.05  # 东道主xG -5% (替代+15% boost)
+KO_HOST_PRESSURE_OPPONENT_RESTORE = True  # 对手不再被-10% penalty
+
+# 依据: R16葡萄牙0-1西班牙 — 双方防守强队均势对决, 模型xG 3.13→实际1球
+# 当双方场均失球均<1.0时, KO赛趋于低比分防守战, xG应下调而非boost
+KO_DEFENSIVE_BATTLE_CONCEDED = 1.0  # 双方avg_conceded<1.0触发防守战
+KO_DEFENSIVE_BATTLE_XG_DISCOUNT = 0.15  # 防守型均势xG -15% (替代+20% boost)
 
 # ============================================
 # v4.6→v4.7 修正: KO主导胜xG修正（设上限 + 高Elo差缓冲）
@@ -298,18 +319,37 @@ class FootballPredictionEngine:
             if r1_b >= self.R1_SCORING_THRESHOLD:
                 xg_b *= (1 + self.R1_MOMENTUM_BOOST)
 
-        # v4.4: 东道主效应修正（KO赛生效）
-        # 依据: 2026 R32复盘 — 墨西哥2-0厄瓜多尔，模型xG 1.24 vs 实际2球，误差+0.76
-        # 东道主主场优势（观众/场地/气候）无法在历史xG中体现
+        # v4.4→v4.12: 东道主效应修正（KO赛生效）
+        # v4.4: 东道主主场xG +15%, 对手xG -10%
+        # v4.12新增: 东道主压力效应 — R16+东道主vs强队(Elo差<150)时反转
+        #   依据: 美国R16 1-4比利时, 美国xG+15%但实际xG仅0.63
+        #   东道主面对强队时观众期望→压力→失误, 主场优势变劣势
         if self._host_effect_enabled and is_knockout:
             a_is_host = team_a in self._host_nations
             b_is_host = team_b in self._host_nations
+            elo_a_val = self.elo_ratings.get(team_a, 1500)
+            elo_b_val = self.elo_ratings.get(team_b, 1500)
+            
             if a_is_host and not b_is_host:
-                xg_a *= (1 + HOST_XG_BOOST)
-                xg_b *= (1 - HOST_OPPONENT_XG_PENALTY)
+                # v4.12: 东道主压力效应判定
+                host_pressure = (elo_b_val - elo_a_val) > 0 and \
+                                abs(elo_a_val - elo_b_val) < KO_HOST_PRESSURE_ELO_GAP
+                if host_pressure:
+                    # 东道主vs强队, 压力>优势
+                    xg_a *= (1 - KO_HOST_PRESSURE_XG_PENALTY)
+                    # 对手不再被penalty (恢复常态)
+                else:
+                    # 东道主vs弱队或均势, 正常+15%
+                    xg_a *= (1 + HOST_XG_BOOST)
+                    xg_b *= (1 - HOST_OPPONENT_XG_PENALTY)
             elif b_is_host and not a_is_host:
-                xg_b *= (1 + HOST_XG_BOOST)
-                xg_a *= (1 - HOST_OPPONENT_XG_PENALTY)
+                host_pressure = (elo_a_val - elo_b_val) > 0 and \
+                                abs(elo_a_val - elo_b_val) < KO_HOST_PRESSURE_ELO_GAP
+                if host_pressure:
+                    xg_b *= (1 - KO_HOST_PRESSURE_XG_PENALTY)
+                else:
+                    xg_b *= (1 + HOST_XG_BOOST)
+                    xg_a *= (1 - HOST_OPPONENT_XG_PENALTY)
 
         # v4.4: 球星加成（KO赛生效）
         # 依据: 2026 R32复盘 — 法国3-0瑞典，Mbappé双响，模型xG 1.69 vs 实际3球，误差+1.31
@@ -349,17 +389,30 @@ class FootballPredictionEngine:
                         elif any(s in SUPERSTAR_A_TIER for s in b_stars):
                             xg_b *= (1 + SUPERSTAR_A_UPSET_BOOST)  # A级+6%
 
-        # v4.5: KO均势对决xG爆发修正
-        # 依据: R32c复盘 — 比利时vs塞内加尔模型xG合计2.01→实际90分钟4球(2倍误差)
-        # 均势对决(Elo差<200, 双方xG接近<1.3倍)在KO赛"背水一战"心态下进球远超预期
-        # 此效应与东道主/球星效应独立(心理因素vs个人能力)，允许叠加
+        # v4.5→v4.12: KO均势对决xG爆发修正（含防守型均势例外）
+        # v4.5: 均势对决(Elo差<200, xG接近<1.3倍)在KO赛背水一战心态下进球远超预期
+        # v4.12新增: 防守型均势例外 — 双方avg_conceded<1.0时为防守战, xG应-15%而非+20%
+        #   依据: 葡0-1西(模型xG 3.13->实际1球), 双方均为防守强队
         if is_knockout:
             elo_a = self.elo_ratings.get(team_a, 1500)
             elo_b = self.elo_ratings.get(team_b, 1500)
             xg_max = max(xg_a, xg_b)
             xg_min = min(xg_a, xg_b)
             xg_ratio = xg_max / max(xg_min, 0.01)
-            if abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD and xg_ratio < KO_BALANCED_XG_RATIO:
+
+            # v4.12: 防守型均势判定
+            stats_a_def = stats_a.get('avg_conceded', LEAGUE_AVG_GOALS)
+            stats_b_def = stats_b.get('avg_conceded', LEAGUE_AVG_GOALS)
+            is_defensive_battle = (stats_a_def < KO_DEFENSIVE_BATTLE_CONCEDED and
+                                    stats_b_def < KO_DEFENSIVE_BATTLE_CONCEDED and
+                                    abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD)
+
+            if is_defensive_battle:
+                # 防守型均势: xG下调而非boost
+                xg_a *= (1 - KO_DEFENSIVE_BATTLE_XG_DISCOUNT)
+                xg_b *= (1 - KO_DEFENSIVE_BATTLE_XG_DISCOUNT)
+            elif abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD and xg_ratio < KO_BALANCED_XG_RATIO:
+                # 普通均势: +20% boost (v4.12: 从+30%下调)
                 xg_a *= (1 + KO_BALANCED_XG_BOOST)
                 xg_b *= (1 + KO_BALANCED_XG_BOOST)
 
@@ -478,7 +531,7 @@ class FootballPredictionEngine:
         ft_direction = 'a' if adj_a > adj_b else 'b' if adj_b > adj_a else 'draw'
         handicap_warnings = []
         if is_knockout:
-            handicap_warnings.append('让球盘命中率极低(17场累计1/9=11.1%)，建议远离')
+            handicap_warnings.append('让球盘命中率极低(19场累计1/11=9.1%)，建议远离')
             if ft_direction != 'draw':
                 handicap_warnings.append(f'FT方向偏向{team_a if ft_direction=="a" else team_b}，让球反向投注属高风险')
 
@@ -488,12 +541,12 @@ class FootballPredictionEngine:
         #   HT/FT Top1 9/17(52.9%) > 比分Top6 ~11/17(64.7%) > 让球[-1]W 1/9(11%)
         strategy_hints = []
         if is_knockout:
-            strategy_hints.append('FT概率方向为主推(17场累计76.5%)，EV价值方向不推荐')
-            strategy_hints.append('总进球Top1为次推(17场累计58.8%)，Top2覆盖达82.4%')
-            strategy_hints.append('HT/FT Top1命中率52.9%(9/17)，可信度低，仅作辅助')
-            strategy_hints.append('比分建议Top6覆盖(17场累计64.7%)，弱队有S级巨星时注意覆盖客胜比分')
-            strategy_hints.append('让球[-1]胜极低置信(1/9=11%)，禁止做串关断链腿')
-            strategy_hints.append('v4.11: 巨星分级(S级逆袭+12%/A级+6%)，KO总进球泊松方差+15%分散')
+            strategy_hints.append('FT概率方向为主推(19场累计78.9%)，EV价值方向不推荐')
+            strategy_hints.append('总进球Top1为次推(19场累计~58%)，Top2覆盖达~74%')
+            strategy_hints.append('HT/FT Top1命中率52.6%(10/19)，可信度低，仅作辅助')
+            strategy_hints.append('比分建议Top6覆盖(19场累计63.2%)，弱队有S级巨星时注意覆盖客胜比分')
+            strategy_hints.append('让球[-1]胜极低置信(1/11=9.1%)，禁止做串关断链腿')
+            strategy_hints.append('v4.12: 东道主压力(R16 vs强队-5%)+防守型均势(双方avg_conceded<1.0时xG-15%)+均势boost降至+20%')
 
         return {
             'team_a': team_a, 'team_b': team_b,
