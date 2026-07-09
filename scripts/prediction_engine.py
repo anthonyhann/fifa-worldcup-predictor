@@ -1,5 +1,5 @@
 """
-足球预测引擎 v4.12 — FIFA世界杯预测计算器
+足球预测引擎 v4.13 — FIFA世界杯预测计算器
 模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
               + 市场共识融合 + R1→R2攻击动量
 v1.1修正: 单场决赛极端防守系数均值回归30%
@@ -39,6 +39,12 @@ v4.12新增: R16均势双场复盘进化 (2026-07-07)
   - KO_BALANCED_XG_BOOST 0.30→0.20(19场累计均值偏差修正, 降低过度推高)
   - 比分尾部拓宽: poisson_matrix max_goals默认7→KO赛8(美国1-4不在Top6验证)
   - 19场累计: FT方向78.9%·比分Top6 63.2%·总进球Top2 73.7%·HT/FT 52.6%·让球1/11=9.1%
+v4.13新增: R16硬币抛掷双场复盘进化 (2026-07-08)
+  - KO防守战阈值放宽: KO_DEFENSIVE_BATTLE_CONCEDED 1.0→1.05(哥伦比亚avg_conceded=1.0原本卡在阈值外未触发)
+  - 硬币抛掷死锁折扣: Elo差<50且双方防守稳健(avg_conceded<=1.05) → xG强折扣-22%(替代+20% boost)，瑞士0-0验证
+  - 总进球尾部分散加宽: KO_TOTAL_GOALS_DISPERSION 0.15→0.25(阿根廷3-2=5球/瑞士0-0均极端漏判，泊松尾部过窄)
+  - 精英队高Elo差buffer: Elo>2050顶级队buffer -8%→-4%(阿根廷2100逆转埃及验证，顶级队即便落后也维持输出)
+  - 点球标记: 硬币抛掷+双防守稳健时加PENS_LIKELY标记 + 平局概率上调+8%
 """
 
 import math
@@ -111,8 +117,24 @@ KO_HOST_PRESSURE_OPPONENT_RESTORE = True  # 对手不再被-10% penalty
 
 # 依据: R16葡萄牙0-1西班牙 — 双方防守强队均势对决, 模型xG 3.13→实际1球
 # 当双方场均失球均<1.0时, KO赛趋于低比分防守战, xG应下调而非boost
-KO_DEFENSIVE_BATTLE_CONCEDED = 1.0  # 双方avg_conceded<1.0触发防守战
+KO_DEFENSIVE_BATTLE_CONCEDED = 1.05  # v4.13: 1.0→1.05 (覆盖哥伦比亚avg_conceded=1.0原本卡在阈值外)
 KO_DEFENSIVE_BATTLE_XG_DISCOUNT = 0.15  # 防守型均势xG -15% (替代+20% boost)
+
+# ============================================
+# v4.13 新增: KO硬币抛掷死锁 + 总进球尾部分散 + 精英队修正
+# 依据: R16瑞士0-0哥伦比亚 — Elo差仅6触发balanced boost(+20%)但哥伦比亚avg_conceded=1.0
+#       恰好未<1.0阈值, 防守战标记未触发, xG被推高至2.74, 实际0-0
+#       阿根廷3-2埃及 — 模型xG 2.24→实际5球, 泊松尾部过窄+精英队输出被压
+# 三处修复:
+#   (1) 硬币抛掷死锁: Elo差<50且双方防守稳健(avg_conceded<=1.05) → 强死锁折扣+平局上调
+#   (2) 总进球尾部分散: KO赛泊松方差+25%(15%→25%), 双侧尾部(0球/5+球)概率提升
+#   (3) 精英队修正: Elo>2050的顶级队高Elo差buffer从-8%降至-4%(阿根廷逆转验证)
+KO_COINFLIP_ELO_THRESHOLD = 50         # Elo差<50判定为真正硬币抛掷
+KO_PENS_LIKELY_DRAW_BOOST = 0.08       # 硬币抛掷时平局概率上调(→点球概率标记)
+KO_DEADLOCK_XG_DISCOUNT = 0.22         # 硬币抛掷+双防守稳健 → xG强折扣(替代+20% boost)
+KO_TOTAL_GOALS_DISPERSION = 0.25       # v4.13: 0.15→0.25 (KO总进球泊松尾部加宽)
+ELITE_ELO_THRESHOLD = 2050             # Elo>2050判定为顶级精英队
+HIGH_ELO_GAP_FAV_BUFFER_ELITE = 0.04   # v4.13: 精英队高Elo差buffer -8%→-4%
 
 # ============================================
 # v4.6→v4.7 修正: KO主导胜xG修正（设上限 + 高Elo差缓冲）
@@ -400,14 +422,24 @@ class FootballPredictionEngine:
             xg_min = min(xg_a, xg_b)
             xg_ratio = xg_max / max(xg_min, 0.01)
 
-            # v4.12: 防守型均势判定
+            # v4.13: 防守型均势判定 (阈值放宽至1.05, 覆盖哥伦比亚avg_conceded=1.0)
             stats_a_def = stats_a.get('avg_conceded', LEAGUE_AVG_GOALS)
             stats_b_def = stats_b.get('avg_conceded', LEAGUE_AVG_GOALS)
-            is_defensive_battle = (stats_a_def < KO_DEFENSIVE_BATTLE_CONCEDED and
-                                    stats_b_def < KO_DEFENSIVE_BATTLE_CONCEDED and
+            both_solid_defense = (stats_a_def <= KO_DEFENSIVE_BATTLE_CONCEDED and
+                                  stats_b_def <= KO_DEFENSIVE_BATTLE_CONCEDED)
+            is_defensive_battle = (both_solid_defense and
                                     abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD)
 
-            if is_defensive_battle:
+            # v4.13: 硬币抛掷死锁判定 (Elo差<50 + 双防守稳健)
+            # 依据: 瑞士0-0哥伦比亚(Elo差6), 真正硬币抛掷且双方防守扎实→易闷平/点球
+            is_coinfllip_deadlock = (both_solid_defense and
+                                     abs(elo_a - elo_b) < KO_COINFLIP_ELO_THRESHOLD)
+
+            if is_coinfllip_deadlock:
+                # 硬币抛掷死锁: 强折扣(比防守战-15%更狠), xG大幅下调
+                xg_a *= (1 - KO_DEADLOCK_XG_DISCOUNT)
+                xg_b *= (1 - KO_DEADLOCK_XG_DISCOUNT)
+            elif is_defensive_battle:
                 # 防守型均势: xG下调而非boost
                 xg_a *= (1 - KO_DEFENSIVE_BATTLE_XG_DISCOUNT)
                 xg_b *= (1 - KO_DEFENSIVE_BATTLE_XG_DISCOUNT)
@@ -446,11 +478,18 @@ class FootballPredictionEngine:
         if is_knockout:
             elo_gap = abs(self.elo_ratings.get(team_a, 1500) - self.elo_ratings.get(team_b, 1500))
             if elo_gap > HIGH_ELO_GAP_THRESHOLD:
-                if self.elo_ratings.get(team_a, 1500) > self.elo_ratings.get(team_b, 1500):
-                    xg_a *= (1 - HIGH_ELO_GAP_FAV_BUFFER)  # 强队xG -8%
+                # v4.13: 精英队(Elo>2050)高Elo差buffer从-8%降至-4%
+                # 依据: 阿根廷(Elo2100)3-2埃及, 顶级队即便落后也能维持输出(逆转验证)
+                fav_elo_a = self.elo_ratings.get(team_a, 1500)
+                fav_elo_b = self.elo_ratings.get(team_b, 1500)
+                fav_buffer = HIGH_ELO_GAP_FAV_BUFFER_ELITE if (
+                    fav_elo_a > ELITE_ELO_THRESHOLD or fav_elo_b > ELITE_ELO_THRESHOLD
+                ) else HIGH_ELO_GAP_FAV_BUFFER
+                if fav_elo_a > fav_elo_b:
+                    xg_a *= (1 - fav_buffer)  # 强队xG折扣(精英-4%/普通-8%)
                     xg_b *= (1 + HIGH_ELO_GAP_UNDERDOG_BOOST)  # 弱队xG +6%
                 else:
-                    xg_b *= (1 - HIGH_ELO_GAP_FAV_BUFFER)
+                    xg_b *= (1 - fav_buffer)
                     xg_a *= (1 + HIGH_ELO_GAP_UNDERDOG_BOOST)
 
         # v4.7: 首次淘汰赛黑马精神加成
@@ -464,20 +503,52 @@ class FootballPredictionEngine:
 
         return xg_a, xg_b
     
-    def poisson_matrix(self, xg_a: float, xg_b: float, max_goals: int = 7) -> Dict:
+    def poisson_matrix(self, xg_a: float, xg_b: float, max_goals: int = 7,
+                       ko_dispersion: float = 0.0) -> Dict:
         win_a = draw = win_b = 0.0
         score_probs = {}
-        
+        raw = {}
         for ga in range(max_goals):
             for gb in range(max_goals):
                 p = self.poisson_prob(xg_a, ga) * self.poisson_prob(xg_b, gb)
-                score_probs[f"{ga}-{gb}"] = round(p * 100, 2)
+                raw[(ga, gb)] = p
                 if ga > gb:
                     win_a += p
                 elif ga == gb:
                     draw += p
                 else:
                     win_b += p
+        
+        # v4.13: KO赛总进球尾部加宽
+        # 泊松模型低估极端比分(0球闷平 / 5+球大战)概率, 对尾部加权提升概率质量
+        if ko_dispersion > 0:
+            mean_total = sum((ga + gb) * p for (ga, gb), p in raw.items())
+            adj = {}
+            for (ga, gb), p in raw.items():
+                total = ga + gb
+                dev = abs(total - mean_total)
+                if total == 0 or total >= 4:
+                    # 极端尾部: 强加权 (0球和5+球更强)
+                    factor = 1 + ko_dispersion * (1.5 if (total == 0 or total >= 5) else 1.0)
+                elif dev >= 2:
+                    factor = 1 + ko_dispersion * 0.5
+                else:
+                    # 中心区(1-3球)轻微降权, 让出概率质量给尾部
+                    factor = 1 - ko_dispersion * 0.25
+                adj[(ga, gb)] = p * factor
+            s = sum(adj.values())
+            raw = {k: v / s for k, v in adj.items()}
+            win_a = draw = win_b = 0.0
+            for (ga, gb), p in raw.items():
+                if ga > gb:
+                    win_a += p
+                elif ga == gb:
+                    draw += p
+                else:
+                    win_b += p
+        
+        for (ga, gb), p in raw.items():
+            score_probs[f"{ga}-{gb}"] = round(p * 100, 2)
         
         return {'win_a': win_a, 'draw': draw, 'win_b': win_b, 'score_probs': score_probs}
     
@@ -491,7 +562,10 @@ class FootballPredictionEngine:
         elo_exp_a = self.elo_expected(elo_a, elo_b)
         
         xg_a, xg_b = self.expected_goals(team_a, team_b, is_knockout, tournament_round)
-        poisson = self.poisson_matrix(xg_a, xg_b)
+        poisson = self.poisson_matrix(
+            xg_a, xg_b,
+            ko_dispersion=KO_TOTAL_GOALS_DISPERSION if is_knockout else 0.0
+        )
         
         combined_a = elo_exp_a * ELO_WEIGHT + poisson['win_a'] * POISSON_WEIGHT
         combined_draw = (1 - abs(elo_exp_a - 0.5)) * 0.15 + poisson['draw'] * POISSON_WEIGHT
@@ -513,6 +587,22 @@ class FootballPredictionEngine:
             combined_a = max(0.01, combined_a)
             combined_b = max(0.01, combined_b)
             combined_draw = max(0.05, min(0.90, combined_draw))
+        
+        # v4.13: 硬币抛掷死锁 → 平局概率上调(→点球标记)
+        # 依据: 瑞士0-0哥伦比亚(Elo差6), 真正硬币抛掷+双防守稳健, 120min闷平→点球
+        pens_likely = False
+        if is_knockout and abs(elo_a - elo_b) < KO_COINFLIP_ELO_THRESHOLD:
+            stats_a_def = self.team_stats.get(team_a, {}).get('avg_conceded', LEAGUE_AVG_GOALS)
+            stats_b_def = self.team_stats.get(team_b, {}).get('avg_conceded', LEAGUE_AVG_GOALS)
+            if stats_a_def <= KO_DEFENSIVE_BATTLE_CONCEDED and stats_b_def <= KO_DEFENSIVE_BATTLE_CONCEDED:
+                pens_likely = True
+                db = KO_PENS_LIKELY_DRAW_BOOST
+                combined_draw += db
+                combined_a -= db / 2
+                combined_b -= db / 2
+                combined_a = max(0.01, combined_a)
+                combined_b = max(0.01, combined_b)
+                combined_draw = max(0.05, min(0.90, combined_draw))
         
         total = combined_a + combined_draw + combined_b
         combined_a /= total; combined_draw /= total; combined_b /= total
@@ -541,12 +631,12 @@ class FootballPredictionEngine:
         #   HT/FT Top1 9/17(52.9%) > 比分Top6 ~11/17(64.7%) > 让球[-1]W 1/9(11%)
         strategy_hints = []
         if is_knockout:
-            strategy_hints.append('FT概率方向为主推(19场累计78.9%)，EV价值方向不推荐')
-            strategy_hints.append('总进球Top1为次推(19场累计~58%)，Top2覆盖达~74%')
-            strategy_hints.append('HT/FT Top1命中率52.6%(10/19)，可信度低，仅作辅助')
-            strategy_hints.append('比分建议Top6覆盖(19场累计63.2%)，弱队有S级巨星时注意覆盖客胜比分')
+            strategy_hints.append('FT概率方向为主推(21场累计~81%)，EV价值方向不推荐')
+            strategy_hints.append('总进球Top1为次推(21场累计~67%)，Top2覆盖达~62% — KO尾部分散后极端球增多, Top2覆盖下降')
+            strategy_hints.append('HT/FT Top1命中率~52%(12/23)，可信度低，仅作辅助')
+            strategy_hints.append('比分建议Top6覆盖(21场累计~52%)，弱队有S级巨星时注意覆盖客胜比分')
             strategy_hints.append('让球[-1]胜极低置信(1/11=9.1%)，禁止做串关断链腿')
-            strategy_hints.append('v4.12: 东道主压力(R16 vs强队-5%)+防守型均势(双方avg_conceded<1.0时xG-15%)+均势boost降至+20%')
+            strategy_hints.append('v4.13: 硬币抛掷死锁(Elo差<50+双防守稳健xG-22%+平局+8%)+总进球尾部分散+25%+精英队buffer-4%')
 
         return {
             'team_a': team_a, 'team_b': team_b,
@@ -578,6 +668,11 @@ class FootballPredictionEngine:
                 'superstar_effect_applied': is_knockout and (self._team_has_superstar(team_a) or self._team_has_superstar(team_b)),
                 'superstar_upset_boost_applied': False,  # v4.10: 在expected_goals中计算后设为True
                 'balanced_xg_boost_applied': is_knockout and abs(elo_a - elo_b) < KO_BALANCED_ELO_THRESHOLD and (max(xg_a, xg_b) / max(min(xg_a, xg_b), 0.01)) < KO_BALANCED_XG_RATIO,
+                'coinfllip_deadlock_applied': is_knockout and abs(elo_a - elo_b) < KO_COINFLIP_ELO_THRESHOLD and (
+                    self.team_stats.get(team_a, {}).get('avg_conceded', LEAGUE_AVG_GOALS) <= KO_DEFENSIVE_BATTLE_CONCEDED and
+                    self.team_stats.get(team_b, {}).get('avg_conceded', LEAGUE_AVG_GOALS) <= KO_DEFENSIVE_BATTLE_CONCEDED
+                ),
+                'pens_likely': pens_likely,
                 'high_elo_gap_buffer_applied': is_knockout and abs(elo_a - elo_b) > HIGH_ELO_GAP_THRESHOLD,
                 'first_ko_debut_boost_applied': is_knockout and (team_a in self._first_ko_debut_teams or team_b in self._first_ko_debut_teams),
                 'handicap_warnings': handicap_warnings,
