@@ -1,5 +1,5 @@
 """
-足球预测引擎 v4.13 — FIFA世界杯预测计算器
+足球预测引擎 v4.14 — FIFA世界杯预测计算器
 模块: Elo评级 + 泊松回归 + 蒙特卡洛模拟 + 赔率分析 + Kelly仓位 + 自我进化 + 实时数据
               + 市场共识融合 + R1→R2攻击动量
 v1.1修正: 单场决赛极端防守系数均值回归30%
@@ -45,6 +45,21 @@ v4.13新增: R16硬币抛掷双场复盘进化 (2026-07-08)
   - 总进球尾部分散加宽: KO_TOTAL_GOALS_DISPERSION 0.15→0.25(阿根廷3-2=5球/瑞士0-0均极端漏判，泊松尾部过窄)
   - 精英队高Elo差buffer: Elo>2050顶级队buffer -8%→-4%(阿根廷2100逆转埃及验证，顶级队即便落后也维持输出)
   - 点球标记: 硬币抛掷+双防守稳健时加PENS_LIKELY标记 + 平局概率上调+8%
+v4.14新增: QF1法国2-0摩洛哥复盘进化 (2026-07-10)
+  - 精英队KO净胜2球修正: 当强队Elo>2050且KO时, 后处理score_probs, 净胜2球×1.18/净胜1球×0.88/净胜3+球×1.10
+  - 依据: QF1 Elo差200未触发防守战/硬币抛掷(均严格<200才触发), 模型1-0(16%)>2-0(11.7%), 实际2-0
+  - 根因: 精英队对"防守稳健但攻击乏力(缺核心箭头Saibari)"对手时, 下半场技术/体能优势扩大比分
+  - 仅后处理比分分布, 不影响FT方向(poisson win_a独立计算), 范围限于精英队KO
+v4.15新增: 比分/总进球特征增强 (2026-07-13)
+  - 交锋史(H2H): data/h2h.json + get_head_to_head(), expected_goals()以H2H_XG_BLEND(0.15)融合历史交锋进球均值
+  - 伤停/阵型 → xG主链路: 修复predict_with_live_data死代码, injuries/lineups经expected_goals()直接进入xG(不再只改WLD)
+  - Poisson低比分校准: poisson_matrix()加Dixon-Coles式0-0/1-0/0-1/1-1通缩(仅作用score_probs, 不影响WLD)
+  - 回放结论: N=5上OLD=NEW=40%单点命中, 零增益(特性保守 + H2H≈模型xG + 样本太小); 真实15.3%/16.7%弱项来自predict_with_consensus单点pick, 非poisson基座
+v4.16新增: 交锋史/伤停注入consensus单点选择 (2026-07-13, 选项A)
+  - predict_with_consensus() 新增 injuries/lineups/use_h2h 参数, 透传至predict()→expected_goals(), 使v4.15的H2H+伤停xG接线在共识路径真正生效
+  - 用H2H调整xG重建泊松矩阵, 其top_scores并入共识候选池(扩大可覆盖比分线)
+  - 总进球选择用H2H avg_total与模型xg_total按H2H_XG_BLEND(0.15)融合
+  - 度量局限: 5场回放无历史市场participantCount且含前瞻污染, 无法证明命中率提升; 机制层面西班牙2-1(avg2.0/0.96→2:1)与真实赛果吻合
 """
 
 import math
@@ -136,6 +151,14 @@ KO_TOTAL_GOALS_DISPERSION = 0.25       # v4.13: 0.15→0.25 (KO总进球泊松�
 ELITE_ELO_THRESHOLD = 2050             # Elo>2050判定为顶级精英队
 HIGH_ELO_GAP_FAV_BUFFER_ELITE = 0.04   # v4.13: 精英队高Elo差buffer -8%→-4%
 
+# v4.14 新增: 精英队 KO 净胜2球修正
+# 依据: QF1 法国2-0摩洛哥 — Elo差200(未触发防守战/硬币抛掷), 模型1-0(16%)>2-0(11.7%)实际2-0
+#   精英队(>2050)对"防守稳健但攻击乏力"对手时, 下半场技术/体能优势扩大比分, 净胜2球概率应高于泊松默认
+#   后处理 score_probs: 不影响FT方向(来自poisson win_a), 只调比分分布
+ELITE_WIN2_BOOST = 0.18      # 净胜2球单元格 ×1.18
+ELITE_WIN1_DAMP = 0.12       # 净胜1球单元格 ×0.88
+ELITE_WIN3_BOOST = 0.10      # 净胜3+球单元格 ×1.10
+
 # ============================================
 # v4.6→v4.7 修正: KO主导胜xG修正（设上限 + 高Elo差缓冲）
 # ============================================
@@ -164,6 +187,19 @@ DEFAULT_FIRST_KO_DEBUT_TEAMS = {      # v4.7: 需要通过比赛进程手动维�
     # 随着比赛推进陆续添加其他首次KO球队
 }
 
+# ============================================
+# v4.15 新增: 比分/总进球特征增强（交锋史 + 伤停/阵型 + 比分线校准）
+# 依据: 复盘准确率 比分15.3% / 总进球16.7% 为最弱维度
+#   1) 交锋史(H2H): 两队历史交锋进球倾向微调xG均值（data/h2h.json）
+#   2) 伤停/阵型: 从predict_with_live_data死代码接入expected_goals()主链路
+#   3) 比分线校准: Dixon-Coles式低比分(0-0/1-0/0-1/1-1)修正, 校正泊松对低比分的过预测
+H2H_XG_BLEND = 0.15              # H2H历史均值对xG的融合权重(保守, 避免小样本过拟合)
+DC_LOW_00 = 0.12                 # 0-0单元格通缩(校正泊松对0-0的过预测)
+DC_LOW_10 = 0.06                 # 1-0单元格通缩
+DC_LOW_01 = 0.06                 # 0-1单元格通缩
+DC_LOW_11 = 0.04                 # 1-1单元格通缩
+SCORELINE_CAL_DEFAULT = True     # 比分线校准默认开启(回放可统一关闭)
+
 
 class FootballPredictionEngine:
     """足球比赛预测引擎 v3.2+"""
@@ -191,6 +227,14 @@ class FootballPredictionEngine:
         # v4.7: 首次KO赛球队追踪
         self._first_ko_debut_teams = set(DEFAULT_FIRST_KO_DEBUT_TEAMS)
 
+        # v4.15: 特征增强开关 + 状态
+        self._h2h_enabled = True
+        self._injury_formation_enabled = True
+        self._scoreline_cal_enabled = SCORELINE_CAL_DEFAULT
+        self._h2h_data = {}
+        self._injuries = None
+        self._lineups = None
+
         if data_dir:
             self.load_data(data_dir)
     
@@ -206,6 +250,12 @@ class FootballPredictionEngine:
         if os.path.exists(stats_path):
             with open(stats_path, 'r', encoding='utf-8') as f:
                 self.team_stats = json.load(f)
+
+        # v4.15: 加载交锋史(H2H)数据
+        h2h_path = os.path.join(data_dir, 'h2h.json')
+        if os.path.exists(h2h_path):
+            with open(h2h_path, 'r', encoding='utf-8') as f:
+                self._h2h_data = json.load(f)
 
     def set_r1_scoring(self, team_goals: Dict[str, int]):
         """v3.4: 设置各队首轮进球数，用于R2攻击动量修正
@@ -254,6 +304,53 @@ class FootballPredictionEngine:
         """
         self._first_ko_debut_teams = set(teams)
 
+    # v4.15 新增: 特征增强 setter + 查询
+    def set_head_to_head(self, h2h: Dict):
+        """v4.15: 注入交锋史数据 { 'A|B': {...}, ... }（顺序无关，引擎自动解析方向）"""
+        self._h2h_data = h2h or {}
+
+    def set_injuries(self, injuries: Dict):
+        """v4.15: 设置伤停数据（与predict_with_live_data格式一致: home_out_count等）"""
+        self._injuries = injuries
+
+    def set_lineups(self, lineups: Dict):
+        """v4.15: 设置阵容/阵型数据（含 home/away.formation）"""
+        self._lineups = lineups
+
+    def toggle_features(self, h2h: bool = None, injury_formation: bool = None,
+                        scoreline_cal: bool = None):
+        """v4.15: 回放用 — 统一开关三大新特性（None=保持当前值）"""
+        if h2h is not None:
+            self._h2h_enabled = h2h
+        if injury_formation is not None:
+            self._injury_formation_enabled = injury_formation
+        if scoreline_cal is not None:
+            self._scoreline_cal_enabled = scoreline_cal
+
+    def get_head_to_head(self, team_a: str, team_b: str) -> Optional[Dict]:
+        """v4.15: 获取两队交锋史（顺序无关）
+
+        Returns:
+            {'avg_a': float, 'avg_b': float, 'avg_total': float, 'meetings': int, ...}
+            其中 avg_a/avg_b 已按 (team_a, team_b) 方向对齐；无数据返回 None
+        """
+        if not self._h2h_enabled:
+            return None
+        for key, rec in self._h2h_data.items():
+            parts = key.split('|')
+            if len(parts) == 2 and {parts[0], parts[1]} == {team_a, team_b}:
+                gf = rec.get('goals_for', {})
+                if team_a in gf and team_b in gf:
+                    return {
+                        'avg_a': gf[team_a],
+                        'avg_b': gf[team_b],
+                        'avg_total': rec.get('avg_total'),
+                        'meetings': rec.get('meetings'),
+                        'source': rec.get('source'),
+                        'note': rec.get('note'),
+                    }
+        return None
+
     def _team_has_superstar(self, team: str) -> bool:
         """v4.4: 检查球队是否有超级巨星"""
         return team in self._superstar_map.values()
@@ -267,7 +364,9 @@ class FootballPredictionEngine:
     
     def expected_goals(self, team_a: str, team_b: str, 
                        is_knockout: bool = False,
-                       tournament_round: str = None) -> Tuple[float, float]:
+                       tournament_round: str = None,
+                       injuries: Dict = None,
+                       lineups: Dict = None) -> Tuple[float, float]:
         stats_a = self.team_stats.get(team_a, {'avg_goals': LEAGUE_AVG_GOALS, 'avg_conceded': LEAGUE_AVG_GOALS})
         stats_b = self.team_stats.get(team_b, {'avg_goals': LEAGUE_AVG_GOALS, 'avg_conceded': LEAGUE_AVG_GOALS})
         
@@ -501,6 +600,35 @@ class FootballPredictionEngine:
             if team_b in self._first_ko_debut_teams:
                 xg_b *= (1 + FIRST_KO_DEBUT_BOOST)
 
+        # v4.15: 伤停/阵型 → xG 主链路接线（修复 predict_with_live_data 死代码）
+        # 此前阵型/伤停只改WLD corrections, 从不进入xG → 比分分布完全不受影响
+        # 现在直接作为xG乘子, 让伤停/阵型真正改变比分与总进球分布
+        if self._injury_formation_enabled:
+            inj = injuries if injuries is not None else self._injuries
+            lin = lineups if lineups is not None else self._lineups
+            if lin:
+                mod_a, mod_b = self._adjust_xg_for_lineups(team_a, team_b, lin)
+                xg_a *= mod_a
+                xg_b *= mod_b
+            if inj:
+                elo_a0 = self.elo_ratings.get(team_a, 1500)
+                elo_b0 = self.elo_ratings.get(team_b, 1500)
+                elo_a_adj, elo_b_adj = self._adjust_elo_for_injuries(team_a, team_b, inj)
+                # 将伤停导致的Elo折损折算为xG乘子(15 Elo ≈ 1% xG, 系数1.5放大可见度)
+                if elo_a_adj != elo_a0:
+                    xg_a *= (1 + (elo_a_adj - elo_a0) / max(elo_a0, 1) * 1.5)
+                if elo_b_adj != elo_b0:
+                    xg_b *= (1 + (elo_b_adj - elo_b0) / max(elo_b0, 1) * 1.5)
+
+        # v4.15: 交锋史(H2H) → xG 均值微调
+        # 两队历史交锋的进球倾向是比分/总进球的有效先验；
+        # 仅以保守权重(H2H_XG_BLEND)融合, 避免小样本/极端值(如1-7)过拟合
+        if self._h2h_enabled:
+            h2h = self.get_head_to_head(team_a, team_b)
+            if h2h and h2h.get('avg_a') is not None and h2h.get('avg_b') is not None:
+                xg_a = xg_a * (1 - H2H_XG_BLEND) + h2h['avg_a'] * H2H_XG_BLEND
+                xg_b = xg_b * (1 - H2H_XG_BLEND) + h2h['avg_b'] * H2H_XG_BLEND
+
         return xg_a, xg_b
     
     def poisson_matrix(self, xg_a: float, xg_b: float, max_goals: int = 7,
@@ -550,22 +678,57 @@ class FootballPredictionEngine:
         for (ga, gb), p in raw.items():
             score_probs[f"{ga}-{gb}"] = round(p * 100, 2)
         
+        # v4.15: Dixon-Coles式低比分修正 — 仅作用于比分分布, 不影响WLD(win_a/draw/win_b)
+        # 独立泊松对 0-0/1-0/0-1/1-1 存在系统性过预测(实际足球低比分略少),
+        # 轻度通缩把概率质量推向邻格, 使单点比分/总进球分布更贴近真实频率
+        if self._scoreline_cal_enabled:
+            dc = {(0, 0): DC_LOW_00, (1, 0): DC_LOW_10, (0, 1): DC_LOW_01, (1, 1): DC_LOW_11}
+            cal = {}
+            for sc, pct in score_probs.items():
+                ga, gb = map(int, sc.split('-'))
+                f = 1.0 - dc.get((ga, gb), 0.0)
+                cal[sc] = pct * f
+            s = sum(cal.values())
+            score_probs = {k: round(v / s * 100, 2) for k, v in cal.items()}
+        
         return {'win_a': win_a, 'draw': draw, 'win_b': win_b, 'score_probs': score_probs}
     
     def predict(self, team_a: str, team_b: str,
                 corrections: Dict = None, is_knockout: bool = False,
-                tournament_round: str = None) -> Dict:
+                tournament_round: str = None,
+                injuries: Dict = None,
+                lineups: Dict = None) -> Dict:
         corrections = corrections or {}
         
         elo_a = self.elo_ratings.get(team_a, 1500)
         elo_b = self.elo_ratings.get(team_b, 1500)
         elo_exp_a = self.elo_expected(elo_a, elo_b)
         
-        xg_a, xg_b = self.expected_goals(team_a, team_b, is_knockout, tournament_round)
+        xg_a, xg_b = self.expected_goals(team_a, team_b, is_knockout, tournament_round,
+                                         injuries, lineups)
         poisson = self.poisson_matrix(
             xg_a, xg_b,
             ko_dispersion=KO_TOTAL_GOALS_DISPERSION if is_knockout else 0.0
         )
+
+        # v4.14: 精英队 KO 净胜2球修正 (后处理 score_probs, 不影响 FT 方向)
+        # 依据: QF1法国2-0摩洛哥, 模型1-0>2-0但实际2-0; 精英队下半场扩大比分
+        if is_knockout and (elo_a >= ELITE_ELO_THRESHOLD or elo_b >= ELITE_ELO_THRESHOLD):
+            fav_is_a = elo_a > elo_b
+            _adj_sp = {}
+            for _score, _p in poisson['score_probs'].items():
+                _ga, _gb = map(int, _score.split('-'))
+                _diff = (_ga - _gb) if fav_is_a else (_gb - _ga)
+                if _diff == 2:
+                    _adj_sp[_score] = _p * (1 + ELITE_WIN2_BOOST)
+                elif _diff == 1:
+                    _adj_sp[_score] = _p * (1 - ELITE_WIN1_DAMP)
+                elif _diff >= 3:
+                    _adj_sp[_score] = _p * (1 + ELITE_WIN3_BOOST)
+                else:
+                    _adj_sp[_score] = _p
+            _s = sum(_adj_sp.values())
+            poisson['score_probs'] = {k: round(v / _s * 100, 2) for k, v in _adj_sp.items()}
         
         combined_a = elo_exp_a * ELO_WEIGHT + poisson['win_a'] * POISSON_WEIGHT
         combined_draw = (1 - abs(elo_exp_a - 0.5)) * 0.15 + poisson['draw'] * POISSON_WEIGHT
@@ -646,7 +809,8 @@ class FootballPredictionEngine:
             'poisson': {
                 'win_a': round(poisson['win_a'] * 100, 1),
                 'draw': round(poisson['draw'] * 100, 1),
-                'win_b': round(poisson['win_b'] * 100, 1)
+                'win_b': round(poisson['win_b'] * 100, 1),
+                'score_probs': poisson['score_probs']
             },
             'combined': {
                 'win_a': round(combined_a * 100, 1),
@@ -674,6 +838,7 @@ class FootballPredictionEngine:
                 ),
                 'pens_likely': pens_likely,
                 'high_elo_gap_buffer_applied': is_knockout and abs(elo_a - elo_b) > HIGH_ELO_GAP_THRESHOLD,
+                'elite_win2_boost_applied': is_knockout and (elo_a >= ELITE_ELO_THRESHOLD or elo_b >= ELITE_ELO_THRESHOLD),
                 'first_ko_debut_boost_applied': is_knockout and (team_a in self._first_ko_debut_teams or team_b in self._first_ko_debut_teams),
                 'handicap_warnings': handicap_warnings,
                 'strategy_hints': strategy_hints,
@@ -836,8 +1001,11 @@ class FootballPredictionEngine:
                                 corrections: Dict = None,
                                 is_knockout: bool = False,
                                 tournament_round: str = None,
-                                wld_direction: str = None) -> Dict:  # v4.10新增
-        """v3.4/v4.10: 融合泊松概率与市场共识的增强预测
+                                wld_direction: str = None,
+                                injuries: Dict = None,
+                                lineups: Dict = None,
+                                use_h2h: bool = True) -> Dict:  # v4.10新增 / v4.16 H2H+injury threading
+        """v3.4/v4.10/v4.16: 融合泊松概率 + H2H交锋史 + 市场共识的增强预测
 
         解决的问题：纯泊松比分选择至今0%命中率。泊松最高概率比分
         在世界杯中极少中奖。市场人气(participantCount)是有效的
@@ -850,6 +1018,13 @@ class FootballPredictionEngine:
         - 'draw' → 优先平局比分 (如 1:1, 0:0, 2:2)
         - None  → 使用原有逻辑(不改变行为)
 
+        v4.16新增: 将 H2H 交锋史与伤停/阵容信号注入 consensus 单点选择:
+        - injuries/lineups 透传至 predict() → expected_goals(), 使 Round2 的
+          H2H xG 接线 + 伤停/阵容 → xG 接线在共识路径真正生效
+        - 用 H2H 调整 xG 重建泊松矩阵, 将其 top_scores 并入共识候选池,
+          直接扩大单点选择可覆盖的比分线
+        - 总进球选择用 H2H avg_total 与模型 xg_total 按 H2H_XG_BLEND 融合
+
         Args:
             team_a, team_b: 球队名
             market_scores: {score_option: participant_count, ...}
@@ -860,17 +1035,61 @@ class FootballPredictionEngine:
             is_knockout: 是否淘汰赛
             tournament_round: 比赛轮次
             wld_direction: WLD方向 'home'/'away'/'draw'/None(不约束)
+            injuries: 伤停字典 (透传 expected_goals)
+            lineups: 阵容字典 (透传 expected_goals)
+            use_h2h: 是否启用 H2H 交锋史增强 (默认 True)
 
         Returns:
             标准预测dict + consensus_scores和consensus_totals字段
         """
-        # 步骤1: 基础预测
-        result = self.predict(team_a, team_b, corrections, is_knockout, tournament_round)
+        # 步骤1: 基础预测 — 透传 injuries/lineups 使 expected_goals 的 H2H+伤停 xG 接线生效
+        result = self.predict(team_a, team_b, corrections, is_knockout, tournament_round, injuries, lineups)
+
+        # v4.16: H2H 信号提取（顺序无关）— 用于扩大共识候选池 + 总进球融合
+        h2h = None
+        h2h_scoreline = None
+        h2h_total = None
+        if use_h2h and self._h2h_enabled:
+            h2h = self.get_head_to_head(team_a, team_b)
+            if h2h and h2h.get('avg_a') is not None and h2h.get('avg_b') is not None:
+                ga_h = int(round(h2h['avg_a']))
+                gb_h = int(round(h2h['avg_b']))
+                h2h_scoreline = f"{ga_h}:{gb_h}"
+                h2h_total = h2h.get('avg_total')
+                result['h2h_signal'] = {
+                    'scoreline': h2h_scoreline,
+                    'avg_a': h2h['avg_a'], 'avg_b': h2h['avg_b'],
+                    'avg_total': h2h_total, 'meetings': h2h.get('meetings'),
+                    'source': h2h.get('source'),
+                }
+                # 用 H2H 调整 xG 重建泊松矩阵 → 并入共识候选池
+                xg_a_h = result['xg_a'] * (1 - H2H_XG_BLEND) + h2h['avg_a'] * H2H_XG_BLEND
+                xg_b_h = result['xg_b'] * (1 - H2H_XG_BLEND) + h2h['avg_b'] * H2H_XG_BLEND
+                pois_h = self.poisson_matrix(
+                    xg_a_h, xg_b_h,
+                    ko_dispersion=KO_TOTAL_GOALS_DISPERSION if is_knockout else 0.0
+                )
+                top_h = sorted(pois_h['score_probs'].items(), key=lambda x: x[1], reverse=True)[:6]
+                seen = set()
+                merged = []
+                for sc, pr in list(result['top_scores']) + top_h:
+                    sc_c = sc.replace('-', ':')
+                    if sc_c not in seen:
+                        seen.add(sc_c)
+                        merged.append((sc_c, pr))
+                result['h2h_xg'] = {'xg_a': round(xg_a_h, 2), 'xg_b': round(xg_b_h, 2)}
+                top_scores_for_consensus = merged
+            else:
+                top_scores_for_consensus = [(s.replace('-', ':'), p) for s, p in result['top_scores']]
+        else:
+            top_scores_for_consensus = [(s.replace('-', ':'), p) for s, p in result['top_scores']]
 
         # 步骤2: 市场共识辅助选择最佳比分
-        top_scores = result['top_scores']
+        top_scores = top_scores_for_consensus
+        result['consensus_candidate_pool'] = top_scores_for_consensus  # v4.16 debug: H2H扩展后的候选池
         best_score = None
         best_score_reason = ""
+        candidate_scores = []  # v4.16: 提升至步骤2外层, 供H2H偏好覆盖使用
 
         if market_scores:
             # 将市场scores的key规范化（colon格式）
@@ -985,9 +1204,36 @@ class FootballPredictionEngine:
                 result['score_pick'] = best_score
                 result['score_confidence'] = top_scores[0][1]
 
+        # v4.16: H2H 偏好覆盖（仅在有市场共识交叉验证、且未触发WLD一致性时生效）—
+        # 当 H2H 隐含比分线在候选池中、且与当前pick泊松概率接近(≤4%)且市场参与
+        # 人数不低于当前pick的60%时, 优先H2H线。这是把H2H喂进共识单点选择的关键机制。
+        if (h2h_scoreline and best_score and h2h_scoreline != best_score
+                and h2h and candidate_scores
+                and not result.get('wld_consistency_applied')):
+            h2h_cand = next((c for c in candidate_scores if c[0] == h2h_scoreline), None)
+            if h2h_cand:
+                s_h, p_h, c_h = h2h_cand
+                cur = next((c for c in candidate_scores if c[0] == best_score), None)
+                if cur:
+                    s_c, p_c, c_c = cur
+                    if abs(p_h - p_c) <= 4.0 and c_h >= c_c * 0.6:
+                        best_score = s_h
+                        result['score_pick'] = s_h
+                        result['score_confidence'] = p_h
+                        result['score_selection_note'] = (
+                            f"H2H偏好覆盖: 历史交锋隐含{h2h_scoreline}"
+                            f"(avg {h2h['avg_a']:.2f}/{h2h['avg_b']:.2f}, n={h2h.get('meetings')}), "
+                            f"泊松{p_h:.1f}%≈当前pick{p_c:.1f}%且市场{c_h}≥{c_c*0.6:.0f}, 优先H2H线"
+                        )
+                        result['h2h_override_applied'] = True
+
         # 步骤3: 市场共识辅助选择总进球
         if market_totals:
             xg_total = result['xg_a'] + result['xg_b']
+            # v4.16: H2H avg_total 与模型 xg_total 按 H2H_XG_BLEND 融合
+            if h2h_total is not None:
+                xg_total = xg_total * (1 - H2H_XG_BLEND) + h2h_total * H2H_XG_BLEND
+                result['h2h_total_blend'] = round(xg_total, 2)
             # 计算泊松各总进球概率
             from math import exp, factorial
             poisson_totals = {}

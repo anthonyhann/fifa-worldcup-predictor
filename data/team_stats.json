@@ -96,8 +96,8 @@
     "avg_conceded": 1.2
   },
   "比利时": {
-    "avg_goals": 1.8,
-    "avg_conceded": 0.9
+    "avg_goals": 1.56,
+    "avg_conceded": 1.23
   },
   "埃及": {
     "avg_goals": 1.2,
@@ -112,8 +112,8 @@
     "avg_conceded": 1.5
   },
   "西班牙": {
-    "avg_goals": 2.1,
-    "avg_conceded": 0.6
+    "avg_goals": 2.07,
+    "avg_conceded": 0.72
   },
   "佛得角": {
     "avg_goals": 1.0,

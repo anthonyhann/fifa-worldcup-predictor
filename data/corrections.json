@@ -110,7 +110,7 @@
   "ko_total_goals_dispersion": {
     "value": 1.15,
     "description": "v4.11进化(7/6): KO赛总进球泊松预测引入+15%分散因子。依据: 墨西哥vs英格兰(模型xG 3.42→实际5球, 红牌+双点球)。泊松分布假设进球率恒定，无法捕捉突发事件(红牌/点球)对总进球的放大。KO赛高对抗性增加此类事件概率。应用: 泊松P(k)分布方差扩大15%。"
-  },"
+  },
   "ko_favorite_discount": {
     "value": 0.95,
     "description": "v4.0→v4.3: 淘汰赛强队xG折扣系数0.95。淘汰赛防守强度提高，强队场均进球低于小组赛。R32验证：巴西2-1(仅赢1球)、德国1-1、荷兰1-1。"
@@ -124,7 +124,7 @@
     "description": "v4.4进化(7/1): 2026世界杯联合东道主(墨西哥/加拿大/美国)KO赛xG+15%。依据: 墨西哥R32 2-0厄瓜多尔，模型xG 1.24 vs 实际2球，误差+0.76。东道主主场优势(观众/场地/气候)无法在历史xG中体现。"
   },
   "host_nation_opponent_penalty": {
-    "value": 0.10,
+    "value": 0.1,
     "description": "v4.4进化(7/1): 东道主对手KO赛xG-10%。客队在东道主主场面临观众压力+旅行疲劳+气候适应，攻击力打折。"
   },
   "superstar_xg_boost": {
@@ -144,7 +144,7 @@
     "description": "v4.5进化(7/2): 球星名单扩充+2人。Kane(英格兰WC13球+R32逆转英雄75'86')、De Bruyne(比利时核心中场+R32 AET绝杀助攻者)。当前名单9人: Mbappé/Haaland/Bellingham/Kane/Vinicius/Lautaro/Musiala/Yamal/De Bruyne。"
   },
   "ko_balanced_xg_boost": {
-    "value": 0.30,
+    "value": 0.3,
     "description": "v4.5进化(7/2): KO均势对决xG爆发修正。触发条件：Elo差<200 且 双方xG极接近(最大值/最小值<1.3倍)。依据: R32c比利时vs塞内加尔模型xG合计2.01→实际90分钟4球(2倍误差)。双方xG同比例+30%。此效应与东道主/球星效应独立(心理因素vs个人能力)，允许叠加——De Bruyne球星加成+均势xG爆发可同时触发。"
   },
   "ko_strategy_probability_priority": {
@@ -188,7 +188,7 @@
     "description": "v4.12进化(7/7): KO防守型均势识别。双方avg_conceded<1.0+Elo差<200时, xG-15%(替代均势+20% boost)。依据: 葡萄牙0-1西班牙(模型xG 3.13→实际1球, 高估2.13)。双方均为防守强队时, KO赛趋于低比分防守战, xG应下调而非boost。"
   },
   "ko_balanced_xg_boost_v412": {
-    "value": 0.20,
+    "value": 0.2,
     "description": "v4.12进化(7/7): KO均势xG boost从+30%→+20%。19场累计: 均势对决xG高估场景(葡西+2.13)与低估场景(美比-1.45)并存, 降低boost幅度减少双向偏差。防守型均势单独走-15%路径。"
   },
   "ko_defensive_battle_threshold_v413": {
@@ -210,5 +210,9 @@
   "ko_pens_likely_draw_boost_v413": {
     "value": 0.08,
     "description": "v4.13进化(7/8): 硬币抛掷死锁时平局概率上调+8%并标记PENS_LIKELY。依据: 瑞士0-0哥伦比亚(120min闷平→点球4-3)。模型原仅给33.9%平局无pens标记, 修正后平局46.6%且明确提示点球风险。"
+  },
+  "elite_win2_boost_v414": {
+    "value": 0.18,
+    "description": "v4.14进化(7/10): 精英队(Elo>=2050)KO净胜2球修正。净胜2球×1.18/净胜1球×0.88/净胜3+球×1.10。依据: QF1法国2-0摩洛哥(Elo差200未触发防守战/硬币抛掷, 模型1-0 16%>2-0 11.7%但实际2-0)。精英队对缺核心攻击手(Saibari)的防守队时下半场扩大比分。后处理score_probs, 不影响FT方向。"
   }
 }

@@ -1,0 +1,37 @@
+{
+  "巴西|德国": {
+    "meetings": 6,
+    "avg_total": 3.83,
+    "goals_for": {"巴西": 1.67, "德国": 2.17},
+    "source": "sportscore.com — 6 senior meetings, 23 goals (巴西10/德国13)",
+    "note": "高比分宿命对决，场均3.83球；含2014半决赛1-7极端值"
+  },
+  "西班牙|比利时": {
+    "meetings": 23,
+    "avg_total": 2.96,
+    "goals_for": {"西班牙": 2.0, "比利时": 0.96},
+    "source": "fwctimes.com — 23 meetings, 68 goals (西班牙46/比利时22)",
+    "note": "西班牙历史碾压，21世纪5连胜总比分13-1；近期交锋偏低比分"
+  },
+  "巴西|日本": {
+    "meetings": 14,
+    "avg_total": 3.21,
+    "goals_for": {"巴西": 2.64, "日本": 0.57},
+    "source": "fwctimes.com — 14 meetings, 45 goals (巴西37/日本8)",
+    "note": "巴西碾压，但2025麒麟杯日本3-2首胜；场均3.21球"
+  },
+  "德国|巴拉圭": {
+    "meetings": 3,
+    "avg_total": 3.0,
+    "goals_for": {"德国": 1.33, "巴拉圭": 1.67},
+    "source": "11v11.com / sportscore — 3 senior meetings, 9 goals (德4/巴5)",
+    "note": "样本极小(3场)：2002德国1-0、2013德国3-3、2003 U20巴拉圭2-0"
+  },
+  "荷兰|摩洛哥": {
+    "meetings": 3,
+    "avg_total": 3.0,
+    "goals_for": {"荷兰": 1.67, "摩洛哥": 1.33},
+    "source": "fwctimes.com — 3 meetings, 9 goals (荷5/摩4)",
+    "note": "样本小(3场)：荷兰2胜1负；场均3.0球"
+  }
+}
