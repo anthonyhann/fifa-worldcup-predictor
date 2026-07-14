@@ -73,6 +73,13 @@ from typing import Dict, List, Tuple, Optional
 LEAGUE_AVG_GOALS = 1.35
 ELO_WEIGHT = 0.45       # v4.10: 0.30→0.45(同步evolution#22, 累计WLD 73.3%支持高Elo权重)
 POISSON_WEIGHT = 0.55   # v4.10: 0.70→0.55(总分准确率仅~29%, 降低泊松权重)
+
+# v4.17: 强强对话 Elo 再加权 — 顶级对决中泊松 xG 噪声大、系统性低估明确实力差距
+# 依据: 法国vs西班牙 模型主胜38% vs 市场81%, 而 Elo期望(57%)更接近真实;
+#        顶级队(Elo>=1980)的Elo比单场xG更可靠, 提升其权重可收敛模型与市场偏差
+STRONG_MATCHUP_MIN_ELO = 1980      # 与 loop_engine v4.16 保持一致(双方均>=此值视为强强对话)
+STRONG_MATCHUP_ELO_WEIGHT = 0.55   # 强强对话 ELO_WEIGHT 0.45→0.55(温和收敛, 避免过度拟合单场)
+STRONG_MATCHUP_POISSON_WEIGHT = 0.45 # 强强对话 POISSON_WEIGHT 0.55→0.45
 DEFENSE_REGRESSION = 0.30
 DEFENSE_EXTREME_THRESHOLD = 0.5
 
@@ -730,9 +737,17 @@ class FootballPredictionEngine:
             _s = sum(_adj_sp.values())
             poisson['score_probs'] = {k: round(v / _s * 100, 2) for k, v in _adj_sp.items()}
         
-        combined_a = elo_exp_a * ELO_WEIGHT + poisson['win_a'] * POISSON_WEIGHT
-        combined_draw = (1 - abs(elo_exp_a - 0.5)) * 0.15 + poisson['draw'] * POISSON_WEIGHT
-        combined_b = (1 - elo_exp_a) * ELO_WEIGHT + poisson['win_b'] * POISSON_WEIGHT
+        # v4.17: 强强对话 Elo 再加权 — 顶级对决泊松xG噪声大、低估实力差距,
+        # 当双方均为精英队(Elo>=1980)时更多信任Elo(更可靠), 收敛模型与市场偏差
+        _eff_elo_w = ELO_WEIGHT
+        _eff_poisson_w = POISSON_WEIGHT
+        if min(elo_a, elo_b) >= STRONG_MATCHUP_MIN_ELO:
+            _eff_elo_w = STRONG_MATCHUP_ELO_WEIGHT
+            _eff_poisson_w = STRONG_MATCHUP_POISSON_WEIGHT
+
+        combined_a = elo_exp_a * _eff_elo_w + poisson['win_a'] * _eff_poisson_w
+        combined_draw = (1 - abs(elo_exp_a - 0.5)) * 0.15 + poisson['draw'] * _eff_poisson_w
+        combined_b = (1 - elo_exp_a) * _eff_elo_w + poisson['win_b'] * _eff_poisson_w
         
         # v2.1修正: 大赛平局概率按轮次调整
         DRAW_BOOST_BY_ROUND = {
