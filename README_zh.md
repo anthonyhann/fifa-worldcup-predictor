@@ -1,181 +1,117 @@
-# :trophy: FIFA 世界杯预测计算器
+<div align="center">
 
-<p align="center">
-  <strong>预测世界杯比赛，复盘真实结果，越用越准。</strong>
-</p>
+# 🏆 FIFA 世界杯预测引擎
 
-<p align="center">
-  <img src="https://img.shields.io/badge/版本-4.1-blue" alt="version">
-  <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
-  <img src="https://img.shields.io/badge/许可证-MIT-yellow" alt="license">
-  <img src="https://img.shields.io/badge/数据-实时阵容%20%2B%20伤停%20%2B%20赔率-red" alt="live data">
-  <img src="https://img.shields.io/badge/比分-worldcup2026%20REST%20API-orange" alt="live scores">
-</p>
+### 一个每场赛后都会给自己打分的世界杯预测引擎
 
-> :us: English version: [README.md](README.md)
+Elo 评级 + 泊松 xG + 10 万次蒙特卡洛模拟 + 贝叶斯战术语境——赛后自动复盘、轮次自适应自校准。**零依赖：纯 Python 标准库。**
 
----
+[![version](https://img.shields.io/badge/version-v4.17-blue?style=flat-square)](SKILL.md)
+[![python](https://img.shields.io/badge/python-3.10%2B-green?style=flat-square)](#-快速开始)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square)](#-快速开始)
+[![license](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
+[![stars](https://img.shields.io/github/stars/anthonyhann/fifa-worldcup-predictor?style=flat-square)](https://github.com/anthonyhann/fifa-worldcup-predictor/stargazers)
 
-## :mag: 这是什么？
+[快速开始](#-快速开始) · [学习闭环](#-学习闭环) · [真实数字](#-真实数字仓库可验证) · [目录结构](#-目录结构) · [诚实边界](#-诚实边界什么时候别用它) · [English](README.md)
 
-一个帮你分析世界杯比赛的工具。输入两支球队，它会告诉你谁更可能赢、大概什么比分、赔率有没有被低估。
+</div>
 
-跟一般预测工具不同的是：比赛打完以后，它会自动搜索真实结果，跟自己的预测做比对。如果发现自己哪里判断偏了，就调整参数。看的比赛越多，预测越靠谱。
+## 大多数预测工具，大概是这样
 
-就像一个永远在复盘录像的分析师。
+- 告诉你谁会赢——然后**再也不回头看**实际发生了什么
+- 首轮和决赛用同一套系数，仿佛淘汰赛 dynamics 不存在
+- 让你"相信模型"，却没有一本**可审计的准确率台账**
 
----
+这个引擎反着来：每场比赛结束后，它抓取真实比分，按 100 分制给自己的预测打分，更新球队评级，并按轮次重新校准系数——过拟合防御会拒绝它无法自圆其说的剧烈跳变。每次迭代都有日志，你能看着它变准（或者抓到他变飘）。
 
-## :dart: 能做什么
+## 能做什么
 
-### :crystal_ball: 赛前预测
+| 阶段 | 能力 |
+|---|---|
+| 🔮 **赛前** | 胜平负概率 + 最可能比分（Elo + 泊松 + 10 万次蒙特卡洛）；轮次自适应系数（R1 保守 ×0.5 → R2 反弹 ×1.10 → R3 常态 → 淘汰赛防守）；三层爆冷检测；晋级路径模拟；错误赔率标记 + Kelly 仓位 |
+| 🛰️ **实时数据** | 开赛前约 1 小时自动获取首发阵容与阵型、伤停报告、多博彩公司赔率——伤停修正实力评级，阵型修正预期进球（BSD API，免费 key） |
+| 📺 **实时比分** | 接入 worldcup2026 REST API（覆盖全部 104 场比赛，免认证），真实比分自动喂入复盘引擎 |
+| 📊 **赛后** | 自动对照真实结果复盘每场预测；按方向/比分/进球/价值四维度 100 分制评分；按真实赛果更新 Elo 评级 |
+| 🧬 **自我进化** | 攒够 3 场复盘自动触发轮次自适应校准；新参数先回测再应用；三重过拟合防御（相邻轮次反向 >0.45 / 单次变化 >0.20 / 样本 <3 场低置信） |
+| 💰 **收益追踪** | 并行模拟 4 种投注策略：半仓 Kelly / 全仓 Kelly / 固定 2% / 仅价值投注，输出 ROI 与最大回撤 |
 
-- **预测胜平负概率**，给出最可能出现的比分
-- **轮次自适应预测** — R1保守(×0.5) → R2反弹(×1.10) → R3常态 → 淘汰赛防守 (v3.2)
-- **三层爆冷检测** — 风格克制 + 状态变量 + 赛制红利，Tier 1/2/3 分级预警
-- **模拟晋级路线**，看每支球队进八强、四强、决赛的概率
-- **找出被错误定价的赔率** —— 当模型判断和博彩市场明显不一致时提醒你
-
-### :satellite: 实时数据（v3.1 新增）
-
-- **首发阵容** —— 赛前约 1 小时自动获取，含阵型分析
-- **伤停报告** —— 谁受伤、谁停赛、谁存疑，以及这对胜负意味着什么
-- **实时赔率** —— 多家博彩公司对比，每 60 秒刷新
-- **增强预测** —— 伤停调整球队实力评级，阵型修正预期进球
-
-> 基于 [BSD Free Football API](https://sports.bzzoiro.com/)。设置 `BSD_API_KEY` 环境变量即可使用 —— 完全免费，无调用次数限制。
-
-### :satellite: 实时比分（v4.1 新增）
-
-- **赛后实时比分** 接入 [rezarahiminia/worldcup2026](https://github.com/rezarahiminia/worldcup2026) —— 免认证 REST API，覆盖全部 104 场世界杯比赛
-- **自动复盘** —— 赛后抓取真实比分，自动喂入复盘引擎
-- **积分榜 & 赛程** 按队名查询
-
-### :bar_chart: 赛后复盘
-
-- **自动复盘**，联网搜索真实比分跟预测做对比
-- **给自己打分**（100 分制），从胜负方向、比分精度、进球预测、价值判断四个维度
-- **更新球队实力评级**，反映真实比赛表现
-
-### :dna: 自我进化（v4.0+ 增强）
-
-- **积累足够场次后自动校准** —— 按轮次独立优化参数
-- **轮次自适应** —— R1/R2/R3/淘汰赛各有独立系数，互不干扰
-- **过拟合防御** —— 检测相邻轮次反向超过 0.45、单次变化超过 0.20 时预警
-- **回测验证** —— 用历史复盘数据验证新参数，防止退化
-- **追踪准确率变化趋势**，一眼看出预测质量是在变好还是变差
-- **模拟多种投注策略的盈亏**，看哪种方式真实比赛能赚钱
-
----
-
-## :rocket: 快速开始
+## 🚀 快速开始
 
 ```bash
+# 1. 克隆（无需 pip install——纯标准库）
 git clone https://github.com/anthonyhann/fifa-worldcup-predictor.git
 cd fifa-worldcup-predictor
-```
 
-不用装任何依赖，纯 Python 标准库就能跑。
+# 2. 看一眼当前的准确率台账
+python3 scripts/evolution_engine.py --report
 
-### 用实时数据增强预测
-
-```python
-from scripts.live_data_fetcher import LiveDataFetcher
+# 3. 预测一场比赛
+python3 -c "
 from scripts.prediction_engine import FootballPredictionEngine
-
-# 一次拉取阵容、伤停、赔率
-fetcher = LiveDataFetcher()
-live = fetcher.get_full_match_data('阿根廷', '法国')
-
 engine = FootballPredictionEngine(data_dir='data')
-prediction = engine.predict_with_live_data('阿根廷', '法国', live, is_knockout=True)
-
-print(f"阿根廷胜: {prediction['final']['win_a']}%")
-print(f"平局:     {prediction['final']['draw']}%")
-print(f"法国胜:   {prediction['final']['win_b']}%")
-print(f"伤停: {prediction['live_data']['injuries']['summary']}")
+p = engine.predict('阿根廷', '法国', is_knockout=True)
+print(p['final'])  # 胜/平/负概率 + 最可能比分
+"
 ```
 
-### 不用实时数据也行
+**给 AI Agent 用**——本仓库自带 [SKILL.md](SKILL.md)。把这句话粘贴给你的 Agent：
 
-```python
-prediction = engine.predict('阿根廷', '法国', is_knockout=True)
-# 什么都没变，不配 API Key 也能跑
-```
+> 阅读 https://github.com/anthonyhann/fifa-worldcup-predictor 里的 SKILL.md，用它预测 <球队A> vs <球队B>。
 
-### 复盘和学习
+可选：设置 `BSD_API_KEY` 环境变量可接入阵容/伤停/实时赔率增强。不设也能正常跑上面的全部流程。
 
-```python
-from scripts.post_match_review import PostMatchReviewer
+## 🔁 学习闭环
 
-reviewer = PostMatchReviewer('.')
-review = reviewer.review_match('阿根廷', '法国', (2, 1), prediction)
-print(f"复盘评分: {review['scores']['total']}/100 — {review['scores']['grade']}")
+1. **预测** —— Elo + 泊松 xG + 战术语境 + 实时数据
+2. **复盘** —— 抓取真实比分，给预测打分，写进日志
+3. **学习** —— 每攒够 3 场复盘触发轮次自适应校准，回测通过才应用
+4. **进步** —— 系数一场一场地向真实世界收敛
 
-# 攒够 3 场，进化引擎自动校准
-from scripts.evolution_engine import EvolutionEngine
-EvolutionEngine('.').evolve()
-```
+整个闭环是公开记账的：[SKILL.md](SKILL.md) 记录了 **23 个版本迭代（v1.1 → v4.17）**，每一版都写明了踩坑教训。最有代表性的是 **v4.7**——引擎抓到了*自己的指标虚高 bug*（自评准确率 98.6% → 修复后真实 36.7%），并据此重置了参数。能自我审计的预测器，才是重点。
 
----
+## 📊 真实数字（仓库可验证）
 
-## :repeat: 学习闭环
+- **13 个 Python 脚本**，约 5,750 行，**0 三方依赖**（只用 json / math / urllib）
+- **48 支国家队**的 Elo 评级 + 攻防数据；**54 个修正因子**（`data/`）
+- 每条晋级路径 **100,000 次**蒙特卡洛模拟（`prediction_engine.py`）
+- **4** 种投注策略并行追踪（`profit_tracker.py`）
+- **365** 条赛后复盘记录（`logs/review_log.jsonl`），持续增长
+- [SKILL.md](SKILL.md) 记录的自评准确率：胜平负方向 **~78%**、整体 ~38%、近 20 场 55%——自报数据，可审计，也诚实标注短板（让球方向 1/9，已标记极低置信）
+- 接入 **2** 个免费数据 API：BSD Football API（阵容/伤停/赔率）+ worldcup2026（104 场实时比分）
 
-1. **预测** —— Elo 评级打底 + 泊松分布算进球 + 战术语境修正 + 实时数据（伤停/阵容）
-2. **复盘** —— 赛后联网搜索真实比分，逐项对比
-3. **学习** —— 每攒够 3 场以上复盘数据，触发参数校准
-4. **进步** —— 重复循环，预测越来越准
-
-同时追踪四种投注策略：半仓 Kelly、全仓 Kelly、固定比例、仅价值投注。
-
----
-
-## :file_folder: 文件结构
+## 📂 目录结构
 
 ```
 fifa-worldcup-predictor/
-├── README.md                  # 英文版
-├── README_zh.md               # 中文版（当前文件）
+├── SKILL.md                  # 完整能力规格 + 23 版进化日志
 ├── scripts/
-│   ├── prediction_engine.py   # 赛前预测 + 实时数据集成
-│   ├── live_data_fetcher.py   # 阵容、伤停、赔率（BSD API）+ 实时比分（worldcup2026）
-│   ├── wc2026_client.py       # worldcup2026 REST API 客户端（104 场数据集）
-│   ├── bsd_client.py          # BSD API 客户端
-│   ├── odds_fetcher.py        # 双源赔率（BSD + The Odds API）
-│   ├── post_match_review.py   # 赛后复盘 + 联网搜索
-│   ├── evolution_engine.py    # 自动校准（含过拟合防御）
-│   └── profit_tracker.py      # 投注模拟
-├── data/                      # Elo 评级、球队统计、修正因子
-├── references/                # 分析框架、校准方法论、集成方案
-└── logs/                      # 预测与复盘记录
+│   ├── prediction_engine.py  # 核心引擎：Elo + 泊松 + 蒙特卡洛 + 市场共识（41 个方法）
+│   ├── live_data_fetcher.py  # 阵容 / 伤停 / 赔率 / 实时比分
+│   ├── evolution_engine.py   # 自动校准 + 回测 + 过拟合防御
+│   ├── post_match_review.py  # 100 分制复盘评分 + 结果抓取
+│   ├── profit_tracker.py     # 4 策略投注模拟
+│   ├── odds_fetcher.py       # 双源赔率对比
+│   ├── wc2026_client.py      # worldcup2026 REST API 客户端
+│   └── …                     # + 诊断、回测、批量运行脚本（共 13 个）
+├── data/                     # elo_ratings / team_stats / corrections / h2h（48 支球队）
+├── references/               # 分析框架、校准方法论、实时数据集成方案
+├── outputs/                  # 预测报告样例（R32 各批次）
+└── logs/                     # prediction_log.md、review_log.jsonl（365 条）、profit_track.jsonl
 ```
 
----
+## ⚠️ 诚实边界——什么时候别用它
 
-## :shield: 底线
+- **这不是投注建议。** 它只输出概率与市场偏差；每个决策（及其后果）都是你自己的。
+- **不预测点球大战。** 只建模常规时间与加时赛。
+- **范围仅限 48 队 2026 世界杯。** 欧洲杯、美洲杯、各国联赛在路线图上，目前不支持。
+- **实时功能需要联网。** 离线时仍可用缓存数据预测，但没有阵容/伤停/赔率增强。
+- **准确率是自报的。** ~38% 整体 / ~78% 方向来自它自己的复盘日志——请把它当研究工具，真金白银之前先跑自己的回测。
 
-- 不会直接告诉你该买哪边 —— 给概率和偏差，决策你自己做
-- 只建模常规时间和加时赛 —— 不预测点球大战
-- 模型和市场大幅偏差时标注不确定性 —— 不假装精准
-- 数据缺失就说缺失 —— 不猜不凑
-- 所有联网搜索结果标注来源和时间
 
----
+## 🙋 关于作者
 
-## :construction: 计划路线
+在 2026 世界杯期间公开迭代——23 个有记录的版本，每一版都由一场模型预测错的真比赛驱动。赛期内每天自用，准确率台账直接放在仓库里。如果它帮你省掉了凌晨两点手调 Elo 系数的痛苦，⭐ 一下，让下一位分析师知道它真的能用。
 
-- [x] ~~实时数据接入 —— 伤停报告、首发公布、实时赔率~~ :tada:
-- [x] ~~轮次自适应修正 —— R1→R2→R3→淘汰赛动态系数~~ :tada:
-- [x] ~~爆冷分析升级 —— 三层判据 + Tier 1/2/3 分级~~ :tada:
-- [x] ~~自我进化引擎 —— 自动校准 + 回测 + 过拟合防御~~（v4.0）:tada:
-- [x] ~~实时比分接入 —— worldcup2026 REST API 自动复盘~~（v4.1）:tada:
-- [ ] 支持更多赛事（欧洲杯、美洲杯、各国联赛）
-- [ ] 更细致的战术模型 —— 球员级别追踪、定位球概率
-- [ ] 更多仓位策略 —— 分级 Kelly、置信度加权
-- [ ] 可视化面板 —— 图表展示预测、复盘、准确率趋势
-
----
-
-## :page_facing_up: 许可证
+## License
 
 MIT — 详见 [LICENSE](LICENSE)。

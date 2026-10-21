@@ -1,179 +1,117 @@
-# :trophy: FIFA World Cup Predictor
+<div align="center">
 
-<p align="center">
-  <strong>Predict World Cup matches. Review real results. Get better over time.</strong>
-</p>
+# 🏆 FIFA World Cup Predictor
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-4.1-blue" alt="version">
-  <img src="https://img.shields.io/badge/python-3.10%2B-green" alt="python">
-  <img src="https://img.shields.io/badge/license-MIT-yellow" alt="license">
-  <img src="https://img.shields.io/badge/data-live%20odds%20%2B%20lineups%20%2B%20injuries-red" alt="live data">
-  <img src="https://img.shields.io/badge/scores-worldcup2026%20REST%20API-orange" alt="live scores">
-</p>
+### A World Cup prediction engine that grades itself after every match
 
-> :cn: 中文用户请阅读 [README_zh.md](README_zh.md)
+Elo ratings + Poisson xG + 100,000-run Monte Carlo + Bayesian tactical context — then automatic post-match review and round-adaptive self-calibration. **Zero dependencies: pure Python standard library.**
 
----
+[![version](https://img.shields.io/badge/version-v4.17-blue?style=flat-square)](SKILL.md)
+[![python](https://img.shields.io/badge/python-3.10%2B-green?style=flat-square)](#-quickstart)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square)](#-quickstart)
+[![license](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
+[![stars](https://img.shields.io/github/stars/anthonyhann/fifa-worldcup-predictor?style=flat-square)](https://github.com/anthonyhann/fifa-worldcup-predictor/stargazers)
 
-## :mag: What is this?
+[Quickstart](#-quickstart) · [How it learns](#-the-learning-loop) · [Numbers](#-numbers-verifiable-in-this-repo) · [Layout](#-repository-layout) · [Boundaries](#-boundaries--when-not-to-use-it) · [中文版](README_zh.md)
 
-A football prediction tool built for the FIFA World Cup. Give it two teams and it tells you who's likely to win, by what score, and whether the odds are off. After the match, it finds the real result online, compares it against the prediction, and adjusts its own parameters — so it gets sharper with every game it watches.
+</div>
 
-Like an analyst who never stops studying film.
+## Most prediction tools, probably
 
----
+- Tell you who wins — then **never look back** at what actually happened
+- Use the same coefficients for Round 1 and the knockout final, as if tournament dynamics didn't exist
+- Say "trust the model" with **no accuracy ledger** you can audit
 
-## :dart: What it can do
+This engine does the opposite: after each match it fetches the real result, scores its own prediction on a 100-point scale, updates team ratings, and recalibrates its per-round coefficients — with an overfitting defense that rejects jumps it can't justify. Every iteration is logged, so you can watch it get sharper (or catch it getting worse).
 
-### :crystal_ball: Before the match
+## What it can do
 
-- **Predict win/draw/loss** odds plus the most likely final score
-- **Adapt per tournament round** — R1 conservative (×0.5), R2 bounce-back (×1.10), R3 normal, KO defensive (v3.2)
-- **Spot potential upsets** with 3-layer detection — style mismatch, form variance, tournament edge
-- **Simulate tournament paths** to see each team's odds of reaching the quarters, semis, or final
-- **Find mispriced odds** — flags when the model disagrees with the market by a meaningful margin
+| Stage | Capability |
+|---|---|
+| 🔮 **Pre-match** | Win/draw/loss probabilities + most likely scores (Elo + Poisson + 100k Monte Carlo), round-adaptive coefficients (R1 conservative ×0.5 → R2 bounce-back ×1.10 → R3 normal → KO defensive), 3-layer upset detection, tournament-path simulation, mispriced-odds flags with Kelly sizing |
+| 🛰️ **Live data** | Starting lineups + formations ~1h before kickoff, injury reports, multi-bookmaker odds — injuries shift strength ratings, formations shift expected goals (BSD API, free key) |
+| 📺 **Live scores** | Real-time results via the worldcup2026 REST API (all 104 matches, no auth), auto-fed into the review engine |
+| 📊 **Post-match** | Auto-review every prediction against the real result; 100-point scoring across direction / exact score / goal totals / value calls; Elo ratings updated from what actually happened |
+| 🧬 **Self-evolution** | Round-adaptive auto-calibration after 3+ reviews, backtest validation before applying new parameters, triple overfitting defense (adjacent-round reversal >0.45, single-step change >0.20, <3 matches = low confidence) |
+| 💰 **Profit tracking** | 4 staking strategies simulated in parallel: half-Kelly / full-Kelly / fixed-2% / value-only, with ROI and max-drawdown reports |
 
-### :satellite: Live data (new in v3.1)
-
-- **Starting lineups** — auto-fetched ~1 hour before kickoff, including formation analysis
-- **Injury reports** — who's out, suspended, or doubtful and how it shifts the odds
-- **Live odds** — multi-bookmaker comparison, refreshed every 60 seconds
-- **Enhances predictions** — injuries adjust team strength ratings; formations shift expected goals
-
-> Powered by the [BSD Free Football API](https://sports.bzzoiro.com/). Just set `BSD_API_KEY` in your environment — free, no rate limits.
-
-### :satellite: Live scores (new in v4.1)
-
-- **Real-time match results** via [rezarahiminia/worldcup2026](https://github.com/rezarahiminia/worldcup2026) — a free, no-auth REST API covering all 104 World Cup matches
-- **Auto-reviews** — fetches actual scores post-match and feeds them into the review engine
-- **Standings & schedule** lookup by team name
-
-### :bar_chart: After the match
-
-- **Review every prediction** automatically by searching the web for real results
-- **Score itself** on a 100-point scale across direction, score accuracy, goal prediction, and value calls
-- **Update team ratings** based on what actually happened on the pitch
-
-### :dna: Self-improvement (v4.0+ enhanced)
-
-- **Auto-calibrate** after watching enough matches — tweaks its own parameters per tournament round
-- **Round-adaptive** — R1/R2/R3/KO each have independent coefficients, calibrated separately
-- **Overfitting defense** — detects when calibration over-corrects (adjacent round reversal >0.45, single-step change >0.20)
-- **Backtest validation** — replays historical predictions with proposed parameters before applying them
-- **Track accuracy over time** so you can see if it's getting smarter
-- **Run profit simulations** across multiple betting strategies
-
----
-
-## :rocket: Quick start
+## 🚀 Quickstart
 
 ```bash
+# 1. Clone (no pip install — pure standard library)
 git clone https://github.com/anthonyhann/fifa-worldcup-predictor.git
 cd fifa-worldcup-predictor
-```
 
-No dependencies to install — pure Python standard library.
+# 2. Look at the current accuracy ledger
+python3 scripts/evolution_engine.py --report
 
-### Predict with live data
-
-```python
-from scripts.live_data_fetcher import LiveDataFetcher
+# 3. Predict a match
+python3 -c "
 from scripts.prediction_engine import FootballPredictionEngine
-
-# Pull lineups, injuries, and odds in one call
-fetcher = LiveDataFetcher()
-live = fetcher.get_full_match_data('Argentina', 'France')
-
 engine = FootballPredictionEngine(data_dir='data')
-prediction = engine.predict_with_live_data('Argentina', 'France', live, is_knockout=True)
-
-print(f"Argentina win: {prediction['final']['win_a']}%")
-print(f"Draw:          {prediction['final']['draw']}%")
-print(f"France win:    {prediction['final']['win_b']}%")
-print(f"Injuries: {prediction['live_data']['injuries']['summary']}")
+p = engine.predict('Argentina', 'France', is_knockout=True)
+print(p['final'])  # win/draw/loss probabilities + top scores
+"
 ```
 
-### Without live data
+**For AI agents** — this repo ships a [SKILL.md](SKILL.md). Paste this to your agent:
 
-```python
-prediction = engine.predict('Argentina', 'France', is_knockout=True)
-# still works — no API key needed
-```
+> Read the SKILL.md in https://github.com/anthonyhann/fifa-worldcup-predictor and predict <Team A> vs <Team B> with it.
 
-### Review and learn
+Optional: set `BSD_API_KEY` to enrich predictions with lineups, injuries and live odds. Without it, everything above still works.
 
-```python
-from scripts.post_match_review import PostMatchReviewer
+## 🔁 The learning loop
 
-reviewer = PostMatchReviewer('.')
-review = reviewer.review_match('Argentina', 'France', (2, 1), prediction)
-print(f"Review: {review['scores']['total']}/100 — {review['scores']['grade']}")
+1. **Predict** — Elo + Poisson xG + tactical context + live data
+2. **Review** — fetch the real result, score the prediction, log it
+3. **Learn** — every 3+ reviews triggers round-adaptive recalibration, backtested before applied
+4. **Improve** — coefficients drift toward reality, one match at a time
 
-# After 3+ reviews, the evolution engine auto-calibrates
-from scripts.evolution_engine import EvolutionEngine
-EvolutionEngine('.').evolve()
-```
+The loop is documented in public: [SKILL.md](SKILL.md) records **23 version iterations (v1.1 → v4.17)**, each with the lesson that caused it. The most instructive one — **v4.7**: the engine caught *its own metric-inflation bug* (self-reported accuracy 98.6% → real 36.7% after the fix) and reset its parameters accordingly. A predictor that audits itself is the point.
 
----
+## 📊 Numbers, verifiable in this repo
 
-## :repeat: The learning loop
+- **13 Python scripts**, ~5,750 LOC, **0 third-party dependencies** (json / math / urllib only)
+- **48 national teams** with Elo ratings + attack/defense stats; **54 correction factors** (`data/`)
+- **100,000** Monte Carlo simulations per tournament path (`prediction_engine.py`)
+- **4** staking strategies tracked (`profit_tracker.py`)
+- **365** post-match review entries logged (`logs/review_log.jsonl`) and counting
+- Self-tracked accuracy, as documented in [SKILL.md](SKILL.md): **~78% win/draw/loss direction**, ~38% overall, 55% on the most recent 20 matches — self-reported, auditable, and honest about its misses (handicap direction: 1/9, marked low-confidence)
+- **2** free data APIs integrated: BSD Football API (lineups/injuries/odds) + worldcup2026 (104-match live scores)
 
-1. **Predict** — Elo ratings + Poisson xG + tactical context + live data (injuries/lineups)
-2. **Review** — web search for real results, compare, score
-3. **Learn** — every 3+ reviews triggers parameter recalibration
-4. **Improve** — repeat, and the predictions get tighter
-
-Four betting strategies tracked in parallel: half-Kelly, full-Kelly, fixed-fraction, and value-only.
-
----
-
-## :file_folder: What's inside
+## 📂 Repository layout
 
 ```
 fifa-worldcup-predictor/
-├── README.md                  # You're reading it
-├── README_zh.md               # Chinese version
+├── SKILL.md                  # Full capability spec + 23-version evolution log
 ├── scripts/
-│   ├── prediction_engine.py   # Match prediction + live data integration
-│   ├── live_data_fetcher.py   # Lineups, injuries, odds (BSD API) + live scores (worldcup2026)
-│   ├── wc2026_client.py       # worldcup2026 REST API client (104-match dataset)
-│   ├── bsd_client.py          # BSD API raw client
-│   ├── odds_fetcher.py        # Dual-source odds (BSD + The Odds API)
-│   ├── post_match_review.py   # Post-match review + web search
-│   ├── evolution_engine.py    # Auto-calibration with overfitting defense
-│   └── profit_tracker.py      # Betting simulations
-├── data/                      # Elo ratings, team stats, corrections
-├── references/                # Framework docs, calibration methodology
-└── logs/                      # Prediction & review records
+│   ├── prediction_engine.py  # Core engine: Elo + Poisson + Monte Carlo + consensus (41 methods)
+│   ├── live_data_fetcher.py  # Lineups / injuries / odds / live scores
+│   ├── evolution_engine.py   # Auto-calibration + backtest + overfitting defense
+│   ├── post_match_review.py  # 100-point review scoring + result fetching
+│   ├── profit_tracker.py     # 4-strategy betting simulation
+│   ├── odds_fetcher.py       # Dual-source odds comparison
+│   ├── wc2026_client.py      # worldcup2026 REST API client
+│   └── …                     # + diagnostics, backtest, batch runners (13 total)
+├── data/                     # elo_ratings / team_stats / corrections / h2h (48 teams)
+├── references/               # Analytical framework, calibration methodology, live-data integration
+├── outputs/                  # Sample prediction reports (R32 batches)
+└── logs/                     # prediction_log.md, review_log.jsonl (365 entries), profit_track.jsonl
 ```
 
----
+## ⚠️ Boundaries — when NOT to use it
 
-## :shield: Boundaries
+- **It is not betting advice.** It outputs probabilities and market edges; every decision (and its consequences) is yours.
+- **No penalty shootouts.** Only regular and extra time are modeled.
+- **Scope is the 48-team 2026 World Cup.** Euro, Copa America and domestic leagues are on the roadmap, not supported today.
+- **Live features need network.** Offline it still predicts from cached data, just without lineups/injuries/odds.
+- **Self-reported accuracy.** The ~38% overall / ~78% direction figures come from its own review log — treat this as a research tool, and run your own backtests before trusting it with anything real.
 
-- It won't tell you what to bet on — probabilities and edges, decisions are yours
-- Models only regular and extra time — no penalty shootout predictions
-- Shows its work — flags uncertainty when model and market disagree
-- Missing data is marked UNAVAILABLE — no guessing
-- All web search results are timestamped and sourced
 
----
+## 🙋 About
 
-## :construction: Roadmap
+Built and iterated in public across the 2026 World Cup — 23 documented versions, each driven by a real match the model got wrong. It is dogfooded daily during the tournament, and the accuracy ledger is part of the repo. If it saves you from hand-tuning Elo coefficients at 2 a.m., a ⭐ tells the next analyst it works.
 
-- [x] ~~Live data — injury reports, lineup announcements, real-time odds~~ :tada:
-- [x] ~~Round-adaptive correction — R1→R2→R3→KO dynamic coefficients~~ :tada:
-- [x] ~~Upset analysis — 3-layer detection with Tier 1/2/3 classification~~ :tada:
-- [x] ~~Self-evolution engine — auto-calibration + backtest + overfitting defense~~ (v4.0) :tada:
-- [x] ~~Live scores — worldcup2026 REST API auto-review pipeline~~ (v4.1) :tada:
-- [ ] Support for more tournaments (Euro, Copa America, domestic leagues)
-- [ ] Richer tactical models — player-level tracking, set-piece probabilities
-- [ ] More staking strategies — fractional Kelly variants, confidence-weighted scaling
-- [ ] Web dashboard for visualizations and accuracy trends
-
----
-
-## :page_facing_up: License
+## License
 
 MIT — see [LICENSE](LICENSE).

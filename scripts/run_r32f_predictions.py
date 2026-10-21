@@ -8,7 +8,7 @@ import math
 from datetime import datetime
 
 # Add skill scripts to path
-SKILL_DIR = '/Users/user/.workbuddy/skills/fifa-worldcup-predictor'
+SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT_DIR = os.path.join(SKILL_DIR, 'scripts')
 sys.path.insert(0, SCRIPT_DIR)
 
