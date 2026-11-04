@@ -115,3 +115,15 @@ Built and iterated in public across the 2026 World Cup — 23 documented version
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## 许可与署名（非代码内容）
+
+代码沿用仓库根目录 `LICENSE` 中的原有许可；**非代码内容**（文档、图片、示意图、数据、提示词与示例文本等）采用 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.zh-hans)，完整条款见 [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0)。
+
+转载、引用或改编非代码内容时，必须署名并注明是否做过修改：
+
+> 来源：fifa-worldcup-predictor · 作者 anthonyhann · https://github.com/anthonyhann/fifa-worldcup-predictor · CC BY 4.0
+
+---
+
+**License & attribution (non-code content).** Code follows the existing `LICENSE` at the repository root. All **non-code content** (documentation, images, diagrams, data, prompts and sample text) is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); full terms in [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0). Reuse must credit the source above and state whether changes were made.
